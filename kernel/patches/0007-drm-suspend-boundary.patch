@@ -1,0 +1,89 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: amania-Jailbreak <amania@users.noreply.github.com>
+Subject: [PATCH] drm: do not retain Surface eDP across system suspend
+
+The Surface eDP retention workaround is needed for ordinary display blanking,
+but it must not be used while the kernel is entering system suspend. Keeping
+the panel prepared and the DP runtime-PM references held during suspend can
+leave the display and power domains half-active and prevent a clean resume.
+
+Keep the workaround scoped to the normal DRM DPMS path. During system suspend
+and resume, use the upstream panel and DP power transitions instead.
+
+---
+ drivers/gpu/drm/bridge/panel.c      | 9 +++++++--
+ drivers/gpu/drm/msm/dp/dp_display.c | 12 +++++++++---
+ 2 files changed, 16 insertions(+), 5 deletions(-)
+
+diff --git a/drivers/gpu/drm/bridge/panel.c b/drivers/gpu/drm/bridge/panel.c
+--- a/drivers/gpu/drm/bridge/panel.c
++++ b/drivers/gpu/drm/bridge/panel.c
+@@ -6,5 +6,6 @@
+ #include <linux/debugfs.h>
+ #include <linux/export.h>
++#include <linux/suspend.h>
+ #include <linux/property.h>
+ 
+ #include <drm/drm_atomic_helper.h>
+@@ -125,7 +126,8 @@ static void panel_bridge_atomic_pre_enable(struct drm_bridge *bridge,
+ 	old_crtc_state = drm_atomic_get_old_crtc_state(atomic_state, crtc);
+ 	if (old_crtc_state && old_crtc_state->self_refresh_active)
+ 		return;
+-	if (panel_bridge->prepared_was_kept) {
++	if (panel_bridge->prepared_was_kept &&
++	    pm_suspend_target_state == PM_SUSPEND_ON) {
+ 		panel_bridge->prepared_was_kept = false;
+ 		return;
+ 	}
+@@ -182,11 +184,13 @@ static void panel_bridge_atomic_post_disable(struct drm_bridge *bridge,
+ 	new_crtc_state = drm_atomic_get_new_crtc_state(atomic_state, crtc);
+ 	if (new_crtc_state && new_crtc_state->self_refresh_active)
+ 		return;
+-	if (panel_bridge->keep_prepared_on_disable) {
++	if (panel_bridge->keep_prepared_on_disable &&
++	    pm_suspend_target_state == PM_SUSPEND_ON) {
+ 		panel_bridge->prepared_was_kept = true;
+ 		return;
+ 	}
+ 
++	panel_bridge->prepared_was_kept = false;
+ 	drm_panel_unprepare(panel_bridge->panel);
+ }
+ 
+diff --git a/drivers/gpu/drm/msm/dp/dp_display.c b/drivers/gpu/drm/msm/dp/dp_display.c
+--- a/drivers/gpu/drm/msm/dp/dp_display.c
++++ b/drivers/gpu/drm/msm/dp/dp_display.c
+@@ -5,6 +5,7 @@
+  */
+ 
+ #include <linux/module.h>
++#include <linux/suspend.h>
+ #include <linux/slab.h>
+ #include <linux/uaccess.h>
+ #include <linux/debugfs.h>
+@@ -1415,7 +1416,9 @@ void msm_dp_bridge_atomic_disable(struct drm_bridge *drm_bridge,
+ 	struct msm_dp_display_private *msm_dp_display;
+ 
+ 	msm_dp_display = container_of(dp, struct msm_dp_display_private, msm_dp_display);
+-	if (dp->is_edp && msm_dp_display->keep_edp_active_on_blank) {
++	if (dp->is_edp &&
++	    msm_dp_display->keep_edp_active_on_blank &&
++	    pm_suspend_target_state == PM_SUSPEND_ON) {
+ 		if (dp->psr_supported)
+ 			msm_dp_display_set_psr(dp, true);
+ 		else
+@@ -1427,8 +1430,11 @@ void msm_dp_bridge_atomic_post_disable(struct drm_bridge *drm_bridge,
+ 	struct msm_dp_display_private *msm_dp_display;
+ 
+ 	msm_dp_display = container_of(dp, struct msm_dp_display_private, msm_dp_display);
+-	if (dp->is_edp && msm_dp_display->edp_blanked)
++	if (dp->is_edp && msm_dp_display->edp_blanked &&
++	    pm_suspend_target_state == PM_SUSPEND_ON)
+ 		return;
++	if (dp->is_edp && msm_dp_display->edp_blanked)
++		msm_dp_display->edp_blanked = false;
+ 
+ 	if (dp->is_edp)
+ 		msm_dp_hpd_unplug_handle(msm_dp_display);
+-- 
+2.47.2
