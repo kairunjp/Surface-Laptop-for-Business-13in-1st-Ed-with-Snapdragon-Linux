@@ -20,6 +20,8 @@ load_module kernel/crypto/ecc.ko
 load_module kernel/crypto/kpp.ko
 load_module kernel/crypto/ecdh_generic.ko
 load_module kernel/net/bluetooth/bluetooth.ko
-load_module kernel/drivers/bluetooth/hci_uart.ko
+# hci_uart imports helper symbols from these provider modules.  Since this
+# early hook uses insmod directly, providers must be inserted first.
 load_module kernel/drivers/bluetooth/btbcm.ko
 load_module kernel/drivers/bluetooth/btqca.ko
+load_module kernel/drivers/bluetooth/hci_uart.ko
