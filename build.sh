@@ -515,10 +515,14 @@ build_initramfs() {
 			"usr/lib/modules/$krel/modules.builtin" 2>/dev/null) \
 			|| die "cannot read initramfs built-in module metadata: $initrd"
 		for builtin_path in \
+			kernel/drivers/block/loop.ko \
 			kernel/drivers/gpu/drm/bridge/aux-bridge.ko \
 			kernel/drivers/phy/qualcomm/phy-qcom-qmp-combo.ko \
 			kernel/drivers/usb/dwc3/dwc3-qcom.ko \
-			kernel/drivers/usb/storage/uas.ko; do
+			kernel/drivers/usb/storage/uas.ko \
+			kernel/fs/isofs/isofs.ko \
+			kernel/fs/overlayfs/overlay.ko \
+			kernel/fs/squashfs/squashfs.ko; do
 			printf '%s\n' "$builtin_list" | grep -Fxq "$builtin_path" \
 				|| die "USB-root built-in metadata is missing: $builtin_path ($initrd)"
 		done
