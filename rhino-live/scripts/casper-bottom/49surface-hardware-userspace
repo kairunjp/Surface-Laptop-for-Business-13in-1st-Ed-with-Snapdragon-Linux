@@ -31,10 +31,13 @@ if [ -d /usr/lib/firmware/qca ]; then
 	cp -a /usr/lib/firmware/qca/. /root/usr/lib/firmware/qca/
 fi
 
-install -D -m 0755 /surface-userspace/surface-audio-init \
+mkdir -p /root/usr/local/sbin /root/etc/systemd/system
+cp /surface-userspace/surface-audio-init \
 	/root/usr/local/sbin/surface-audio-init
-install -D -m 0644 /surface-userspace/surface-audio-init.service \
+cp /surface-userspace/surface-audio-init.service \
 	/root/etc/systemd/system/surface-audio-init.service
+chmod 0755 /root/usr/local/sbin/surface-audio-init
+chmod 0644 /root/etc/systemd/system/surface-audio-init.service
 mkdir -p /root/etc/systemd/system/multi-user.target.wants
 ln -sf ../surface-audio-init.service \
 	/root/etc/systemd/system/multi-user.target.wants/surface-audio-init.service
