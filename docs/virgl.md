@@ -8,8 +8,11 @@ existing working EL2 kernel, DTB and firmware for this userspace change.
 Run `tools/install-surface-virgl-mesa.sh` as root on the installed ARM64 host.
 The script adds the signed official backports source if absent, selects only
 the Mesa packages from that suite, records the previous package inventory,
-and checks hardware EGL. It does not change VM configurations or restart VMs.
-Stop/start affected VMs through PVE to load the new libraries.
+installs the ARM64 Pixman fix, and checks hardware EGL. Then run
+`tools/enable-surface-virgl-sysmem.sh` once. It diverts the package-managed
+`/usr/bin/kvm` symlink and applies `FD_MESA_DEBUG=sysmem` only when the QEMU
+command contains `virtio-gpu-gl`. Stop/start affected VMs through PVE to load
+the new libraries and wrapper.
 
 For a VM using `vga: virtio-gl`, PVE generates `virtio-gpu-gl` and
 `egl-headless,gl=core`. Leave `kvm: 1` enabled. No software renderer override
@@ -31,19 +34,37 @@ DRM fdinfo reports `drm-driver: msm` with nonzero GPU execution time and
 cycles. The previous unsupported-GPU message is absent. Existing
 virglrenderer 1.1.0 and PVE QEMU 11.0.3 are retained.
 
-Hardware rendering support and VM stability are separate checks. The first
-post-upgrade VM run still stopped after approximately 32 seconds without a
-kernel fault. That exit is not yet explained; the earlier claim that the
-unsupported-GPU message probably caused the exits was not proven.
-QMP event capture and an exit-only strace were added for a second run.
-The second run remained running for more than 100 seconds, with GPU time
-increasing from 227 ms to 307 ms and resident GPU memory reaching 145744 KiB.
-No GPU fault or unsupported-GPU message appeared. QMP recorded an RTC update;
-no shutdown event was observed during capture. Guest desktop rendering and
-sustained stability still need verification.
+The first post-upgrade runs exposed a separate host crash. QEMU was killed by
+SIGSEGV in the `SPICE Worker`, at `libpixman-1.so.0` from Debian trixie's
+0.44.0-3 package. There was no host OOM, kernel GPU fault, or QMP shutdown
+event. This matches Debian bug #1059145: the ARM64 NEON advanced prefetcher
+could read past the end of an image buffer when the stride was negative. The
+fix is in Pixman 0.46.0 and later. The host now uses Debian's
+`libpixman-1-0` 0.46.4-1+b2 package; the previous 0.44.0-3 package is kept in
+the remote rollback directory.
 
-Initial deployment records, VM config backup and installation log are in
+Pixman alone stops the QEMU SIGSEGV, but the unmodified Freedreno GMEM path
+then produced one Adreno `gpu fault ring 2`/`hangcheck recover` event after
+about 17 minutes. QEMU stayed alive, but this is not acceptable for a host
+that is expected to run VMs continuously. With `FD_MESA_DEBUG=sysmem`, the
+same Mesa 26.1.2, virglrenderer 1.1.0, `virtio-gpu-gl`, and KVM stack stayed
+running for 1140 seconds without another GPU fault, QEMU SIGSEGV, Pixman
+error, or OOM event. The QEMU process still opens `/dev/dri/renderD128` and
+uses the `msm` DRM driver, so this is hardware virgl rendering with a lower
+performance sysmem rendering path rather than a software renderer fallback.
+The installed wrapper was then exercised through a normal `qm start` and
+remained running for a further 600-second watch with the same clean result.
+
+The wrapper preserves `/usr/bin/kvm` as QEMU's `argv[0]`; without that, QEMU
+rejects `-cpu host` on ARM64. The dpkg diversion keeps the wrapper across PVE
+package updates. To remove the workaround after a future Freedreno fix, stop
+the affected VMs, remove `/usr/bin/kvm`, run
+`dpkg-divert --remove --rename --divert /usr/bin/kvm.pve-real --package surface-virgl /usr/bin/kvm`,
+and start the VMs again.
+
+The installer also verifies Pixman >= 0.46.0. It adds the signed Debian
+unstable source only for that package transaction and removes the source on
+exit; unstable is not left as a system-wide apt source. Initial deployment
+records, VM config backup and installation logs are in
 `/root/surface-virgl-backup/` on the host. The host's log clock was
-2026-09-07 JST during these tests. Package inventories permit selecting the
-previous versions for rollback; review an apt downgrade simulation for all
-five Mesa packages together before applying it. No boot artifacts changed.
+2026-09-07 JST during these tests. No boot artifacts changed.
