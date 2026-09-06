@@ -1,0 +1,42 @@
+#!/bin/sh
+
+PREREQ=""
+
+prereqs()
+{
+	echo "$PREREQ"
+}
+
+case "${1:-}" in
+prereqs)
+	prereqs
+	exit 0
+	;;
+esac
+
+# Files in the initramfs disappear at switch_root.  Copy the board profile,
+# topology and Bluetooth firmware into the Rhino live root first.
+if [ -d /surface-ucm/Qualcomm/x1e80100 ] && [ -d /root/usr/share/alsa/ucm2 ]; then
+	mkdir -p /root/usr/share/alsa/ucm2/Qualcomm/x1e80100
+	cp -a /surface-ucm/Qualcomm/x1e80100/. /root/usr/share/alsa/ucm2/Qualcomm/x1e80100/
+fi
+
+if [ -d /usr/lib/firmware/qcom/x1e80100 ]; then
+	mkdir -p /root/usr/lib/firmware/qcom/x1e80100
+	cp -a /usr/lib/firmware/qcom/x1e80100/. /root/usr/lib/firmware/qcom/x1e80100/
+fi
+
+if [ -d /usr/lib/firmware/qca ]; then
+	mkdir -p /root/usr/lib/firmware/qca
+	cp -a /usr/lib/firmware/qca/. /root/usr/lib/firmware/qca/
+fi
+
+install -D -m 0755 /surface-userspace/surface-audio-init \
+	/root/usr/local/sbin/surface-audio-init
+install -D -m 0644 /surface-userspace/surface-audio-init.service \
+	/root/etc/systemd/system/surface-audio-init.service
+mkdir -p /root/etc/systemd/system/multi-user.target.wants
+ln -sf ../surface-audio-init.service \
+	/root/etc/systemd/system/multi-user.target.wants/surface-audio-init.service
+
+exit 0

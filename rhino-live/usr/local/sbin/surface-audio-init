@@ -1,0 +1,26 @@
+#!/bin/sh
+
+set -u
+
+card=0
+tries=0
+while [ ! -r "/proc/asound/card${card}/id" ] && [ "$tries" -lt 45 ]; do
+	sleep 1
+	tries=$((tries + 1))
+done
+
+if [ ! -r "/proc/asound/card${card}/id" ]; then
+	echo "Surface audio card did not appear" >&2
+	exit 1
+fi
+
+# Activate the same UCM route used by the tested persistent installation.
+/usr/bin/alsaucm -c "hw:${card}" set _verb HiFi
+/usr/bin/alsaucm -c "hw:${card}" set _enadev Speaker
+
+# Keep the backend route explicit.  This is harmless when UCM already set it
+# and avoids a race where PipeWire probes the PCM before the route is active.
+/usr/bin/amixer -c "$card" cset \
+	name='WSA_CODEC_DMA_RX_0 Audio Mixer MultiMedia1' 1 >/dev/null
+
+exit 0

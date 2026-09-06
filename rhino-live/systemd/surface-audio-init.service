@@ -1,0 +1,12 @@
+[Unit]
+Description=Initialize Surface Laptop audio routing
+After=sound.target systemd-udev-settle.service
+Before=display-manager.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/surface-audio-init
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
