@@ -462,7 +462,16 @@ main() {
 	local grub cfg shim
 	grub=$(find_base_file grubaa64.efi)
 	cfg=$(find_base_file grub.cfg)
-	shim=$(find_base_file bootaa64.efi)
+	# Proxmox EFI images carry the signed shim as shimaa64.efi and may also
+	# carry a platform default BOOTAA64.EFI.  The latter can already be a
+	# Surface launcher from an earlier build; copying it as the normal shim
+	# installs Secure Launch on the default firmware path and can re-enter the
+	# EFI Shell or install the hook twice.  Prefer the actual shim and retain
+	# BOOTAA64.EFI only as a fallback for images which do not provide it.
+	shim=$(find_base_file shimaa64.efi)
+	if [[ -z "$shim" ]]; then
+		shim=$(find_base_file bootaa64.efi)
+	fi
 	[[ -n "$grub" && -n "$cfg" && -n "$shim" ]] || die "base EFI image lacks grubaa64.efi, grub.cfg, or bootaa64.efi"
 
 	log "Creating $IMAGE_SIZE FAT EFI image"
