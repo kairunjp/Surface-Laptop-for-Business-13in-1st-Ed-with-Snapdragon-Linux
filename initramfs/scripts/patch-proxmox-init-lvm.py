@@ -13,36 +13,33 @@ LVM_BLOCK = r'''# The installer switches from this initramfs to the stock Proxmo
 # and VG without device-mapper, but its first lvcreate (normally the swap LV)
 # fails unless dm_mod is already active.  Preload the complete thin-pool stack
 # as well, because the installer creates pve/data later in the same run.
-surface_dm_base="/lib/modules/$(uname -r)/kernel/drivers/md"
-
 load_surface_dm_module() {
     module_name=$1
-    module_path=$2
 
     if grep -qw "$module_name" /proc/modules; then
         return 0
     fi
 
     echo "surface-initramfs: loading $module_name"
-    if [ ! -f "$module_path" ]; then
-        debugsh_err_reboot "required Surface LVM module is missing: $module_path"
-    fi
     if ! /sbin/modprobe "$module_name"; then
         debugsh_err_reboot "failed to load Surface LVM module: $module_name"
     fi
 }
 
-load_surface_dm_module dm_mod "$surface_dm_base/dm-mod.ko"
-load_surface_dm_module dm_bio_prison "$surface_dm_base/dm-bio-prison.ko"
-load_surface_dm_module dm_bufio "$surface_dm_base/dm-bufio.ko"
-load_surface_dm_module dm_persistent_data \
-    "$surface_dm_base/persistent-data/dm-persistent-data.ko"
-load_surface_dm_module dm_thin_pool "$surface_dm_base/dm-thin-pool.ko"
+# dm_thin_pool pulls in bio-prison, bufio and persistent-data according to the
+# kernel's modules.dep.  Let modprobe resolve their installed paths instead of
+# duplicating those paths here; concatenated installer initramfs archives can
+# otherwise make an early fixed-path test disagree with modprobe's view.
+load_surface_dm_module dm_mod
+load_surface_dm_module dm_thin_pool
 /sbin/mdev -s
 
-if [ ! -d /sys/module/dm_mod ] || [ ! -d /sys/module/dm_thin_pool ]; then
-    debugsh_err_reboot "Surface LVM modules did not remain active"
-fi
+for module_name in \
+    dm_mod dm_bio_prison dm_bufio dm_persistent_data dm_thin_pool; do
+    if [ ! -d "/sys/module/$module_name" ]; then
+        debugsh_err_reboot "Surface LVM module did not remain active: $module_name"
+    fi
+done
 
 '''
 
@@ -75,7 +72,9 @@ def main() -> None:
 
     if 'insmod "$module_path"' in text:
         raise SystemExit("unsafe direct insmod remains in Surface LVM loader")
-    if text.count("surface_dm_base=") != 1:
+    if "surface_dm_base=" in text or 'module_path=$2' in text:
+        raise SystemExit("fixed Surface LVM module path remains in loader")
+    if text.count("load_surface_dm_module dm_thin_pool") != 1:
         raise SystemExit("Surface LVM loader was not installed exactly once")
     path.write_text(text, encoding="utf-8")
 

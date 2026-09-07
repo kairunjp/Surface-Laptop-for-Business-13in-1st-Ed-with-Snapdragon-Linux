@@ -149,10 +149,12 @@ The builder also verifies that the selected initramfs contains the Proxmox ISO
 `.cd-info` and installer `init`; a generic Debian initramfs is rejected because
 it drops to BusyBox with `No root device specified` when used without a root= argument.
 Before rebuilding the ISO, it patches the Proxmox installer `init` to preload
-the Surface kernel's `dm_mod`, bio-prison, bufio, persistent-data, and thin-pool
-modules through `/sbin/modprobe`. The build fails if that loader, any required
-module, or the LVM userspace tool is absent, preventing an installer from
-reaching `lvcreate` without a working device-mapper stack.
+the Surface kernel's `dm_mod` and thin-pool stack through `/sbin/modprobe`.
+`modprobe` resolves bio-prison, bufio, and persistent-data from `modules.dep`,
+then the init script verifies that the complete stack is active in `/sys/module`.
+The build fails if that loader, any required module, or the LVM userspace tool
+is absent, preventing an installer from reaching `lvcreate` without a working
+device-mapper stack.
 
 For an installed system, use `tools/installed-grub-surface-laptop-13` as the
 custom `/etc/grub.d/01_surface-laptop-13`. It arms `surface-el1-ready` before

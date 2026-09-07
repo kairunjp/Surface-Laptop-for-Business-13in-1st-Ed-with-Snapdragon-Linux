@@ -362,6 +362,18 @@ verify_proxmox_installer_initrd() {
 		rm -f -- "$listing"
 		die "initrd still uses unavailable insmod for Surface LVM modules: $initrd"
 	fi
+	if grep -Fq 'surface_dm_base=' <<<"$init_text" || grep -Fq 'module_path=$2' <<<"$init_text"; then
+		rm -f -- "$listing"
+		die "initrd still uses fixed Surface LVM module paths: $initrd"
+	fi
+	grep -Fq 'load_surface_dm_module dm_thin_pool' <<<"$init_text" || {
+		rm -f -- "$listing"
+		die "initrd does not ask modprobe to resolve the thin-pool dependency stack: $initrd"
+	}
+	grep -Fq 'dm_mod dm_bio_prison dm_bufio dm_persistent_data dm_thin_pool' <<<"$init_text" || {
+		rm -f -- "$listing"
+		die "initrd does not verify the complete Surface LVM module stack: $initrd"
+	}
 	for required in \
 		dm-mod.ko \
 		dm-bio-prison.ko \
