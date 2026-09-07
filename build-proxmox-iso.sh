@@ -306,8 +306,39 @@ verify_efi_default_shim() {
 	printf 'EFI default: BOOTAA64.EFI matches shimaa64.efi (%s)\n' "$boot_hash"
 }
 
+patch_proxmox_initrd_lvm() {
+	local initrd=$1 raw_initrd init_file manifest patched compressed
+	raw_initrd=$(mktemp "$WORK_DIR/proxmox-initrd-lvm-raw.XXXXXX.img")
+	init_file=$(mktemp "$WORK_DIR/proxmox-init-lvm.XXXXXX")
+	manifest=$(mktemp "$WORK_DIR/proxmox-initrd-lvm.XXXXXX.manifest")
+	patched=$(mktemp "$WORK_DIR/proxmox-initrd-lvm-patched.XXXXXX.img")
+	compressed=$(mktemp "$WORK_DIR/proxmox-initrd-lvm-compressed.XXXXXX.img")
+	rm -f -- "$raw_initrd" "$patched" "$compressed"
+
+	log "Enabling Surface device-mapper/LVM in Proxmox initrd"
+	if zstd -t "$initrd" >/dev/null 2>&1; then
+		zstd -q -dc "$initrd" >"$raw_initrd"
+	elif gzip -t "$initrd" >/dev/null 2>&1; then
+		gzip -dc "$initrd" >"$raw_initrd"
+	else
+		die "unsupported initrd compression: $initrd (expected zstd or gzip)"
+	fi
+
+	cpio -i --to-stdout init 2>/dev/null <"$raw_initrd" >"$init_file" ||
+		die "cannot extract Proxmox installer init from $initrd"
+	python3 "$ROOT_DIR/initramfs/scripts/patch-proxmox-init-lvm.py" "$init_file"
+	sh -n "$init_file"
+	printf 'init %s 0755\n' "$init_file" >"$manifest"
+	python3 "$ROOT_DIR/initramfs/scripts/augment-newc-initramfs.py" --raw \
+		"$raw_initrd" "$patched" "$manifest"
+	zstd -q -T0 -19 -f "$patched" -o "$compressed"
+	mv -- "$compressed" "$initrd"
+	zstd -q -dc "$initrd" | cpio -it --quiet >/dev/null
+	rm -f -- "$raw_initrd" "$init_file" "$manifest" "$patched"
+}
+
 verify_proxmox_installer_initrd() {
-	local initrd=$1 listing init_text
+	local initrd=$1 listing init_text required
 	[[ -s "$initrd" ]] || die "installer initrd is missing or empty: $initrd"
 	listing=$(mktemp "$WORK_DIR/initrd-list.XXXXXX")
 	if ! zstd -q -dc "$initrd" | cpio -it --quiet >"$listing" 2>/dev/null; then
@@ -323,8 +354,31 @@ verify_proxmox_installer_initrd() {
 		rm -f -- "$listing"
 		die "initrd has generic root-mount logic; use the Proxmox installer initrd instead: $initrd"
 	fi
+	grep -Fq 'if ! /sbin/modprobe "$module_name"; then' <<<"$init_text" || {
+		rm -f -- "$listing"
+		die "initrd does not preload Surface device-mapper modules with modprobe: $initrd"
+	}
+	if grep -Fq 'insmod "$module_path"' <<<"$init_text"; then
+		rm -f -- "$listing"
+		die "initrd still uses unavailable insmod for Surface LVM modules: $initrd"
+	fi
+	for required in \
+		dm-mod.ko \
+		dm-bio-prison.ko \
+		dm-bufio.ko \
+		dm-persistent-data.ko \
+		dm-thin-pool.ko; do
+		grep -Eq "^lib/modules/[^/]*surface-laptop-13/kernel/drivers/md/(persistent-data/)?$required$" "$listing" || {
+			rm -f -- "$listing"
+			die "initrd is missing Surface LVM module $required: $initrd"
+		}
+	done
+	grep -Fxq 'sbin/lvm' "$listing" || {
+		rm -f -- "$listing"
+		die "initrd is missing the LVM userspace tool: $initrd"
+	}
 	rm -f -- "$listing"
-	printf 'Installer initrd: Proxmox ISO init detected (%s)\n' "$initrd"
+	printf 'Installer initrd: Proxmox ISO init and Surface LVM stack detected (%s)\n' "$initrd"
 }
 
 append_el2_grub_entries() {
@@ -1012,6 +1066,7 @@ main() {
 	if [[ "$INCLUDE_MODULES" -eq 1 ]]; then
 		augment_initrd_with_modules "$STAGE_DIR/boot/initrd.img"
 	fi
+	patch_proxmox_initrd_lvm "$STAGE_DIR/boot/initrd.img"
 	verify_proxmox_installer_initrd "$STAGE_DIR/boot/initrd.img"
 	patch_grub_config "$STAGE_DIR/boot/grub/grub.cfg" "$DTB_NAME"
 	if [[ -n "$EL2_DTB_FILE" ]]; then

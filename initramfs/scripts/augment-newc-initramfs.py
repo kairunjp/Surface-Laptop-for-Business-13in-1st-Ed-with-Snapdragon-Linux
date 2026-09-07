@@ -79,10 +79,13 @@ def read_manifest(path: str) -> dict[str, tuple[bytes, int]]:
 
 
 def main() -> None:
-    if len(sys.argv) != 4:
-        raise SystemExit(f"usage: {sys.argv[0]} INPUT OUTPUT MANIFEST")
-    source, target, manifest = sys.argv[1:]
-    entries, trailer = parse_entries(gzip.decompress(open(source, "rb").read()))
+    raw = len(sys.argv) == 5 and sys.argv[1] == "--raw"
+    args = sys.argv[2:] if raw else sys.argv[1:]
+    if len(args) != 3:
+        raise SystemExit(f"usage: {sys.argv[0]} [--raw] INPUT OUTPUT MANIFEST")
+    source, target, manifest = args
+    source_data = open(source, "rb").read()
+    entries, trailer = parse_entries(source_data if raw else gzip.decompress(source_data))
     replacements = read_manifest(manifest)
     kept = [(name, raw) for name, raw in entries if name not in replacements]
     ino = len(kept) + 1
@@ -90,11 +93,8 @@ def main() -> None:
         (name, newc_entry(name.encode("utf-8", "surrogateescape"), payload, mode, ino + i))
         for i, (name, (payload, mode)) in enumerate(replacements.items())
     ]
-    packed = gzip.compress(
-        b"".join(raw for _, raw in kept + additions) + trailer,
-        compresslevel=9,
-        mtime=0,
-    )
+    archive = b"".join(raw_entry for _, raw_entry in kept + additions) + trailer
+    packed = archive if raw else gzip.compress(archive, compresslevel=9, mtime=0)
     os.makedirs(os.path.dirname(os.path.abspath(target)), exist_ok=True)
     with open(target, "xb") as output:
         output.write(packed)
