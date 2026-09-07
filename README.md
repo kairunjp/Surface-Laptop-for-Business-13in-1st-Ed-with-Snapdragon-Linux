@@ -145,6 +145,9 @@ entry follows the installed Surface sequence (`surface-kvm-entry.efi`,
 slbounce, then the standalone KVM GRUB), and saves a Ready entry on the USB
 FAT environment as the one-shot fallback. The menu keeps both KVM and PVE
 Ready installer entries, with KVM selected by default on the first USB boot.
+The builder also verifies that the selected initramfs contains the Proxmox ISO
+`.cd-info` and installer `init`; a generic Debian initramfs is rejected because
+it drops to BusyBox with `No root device specified` when used without a root= argument.
 
 For an installed system, use `tools/installed-grub-surface-laptop-13` as the
 custom `/etc/grub.d/01_surface-laptop-13`. It arms `surface-el1-ready` before

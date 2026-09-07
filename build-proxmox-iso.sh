@@ -306,6 +306,27 @@ verify_efi_default_shim() {
 	printf 'EFI default: BOOTAA64.EFI matches shimaa64.efi (%s)\n' "$boot_hash"
 }
 
+verify_proxmox_installer_initrd() {
+	local initrd=$1 listing init_text
+	[[ -s "$initrd" ]] || die "installer initrd is missing or empty: $initrd"
+	listing=$(mktemp "$WORK_DIR/initrd-list.XXXXXX")
+	if ! zstd -q -dc "$initrd" | cpio -it --quiet >"$listing" 2>/dev/null; then
+		rm -f -- "$listing"
+		die "installer initrd is not a readable zstd cpio archive: $initrd"
+	fi
+	grep -Fxq '.cd-info' "$listing" || {
+		rm -f -- "$listing"
+		die "initrd is not a Proxmox installer initrd (.cd-info is missing): $initrd"
+	}
+	init_text=$(zstd -q -dc "$initrd" | cpio -i --to-stdout init 2>/dev/null || true)
+	if ! grep -Fq 'Proxmox Server Solutions' <<<"$init_text"; then
+		rm -f -- "$listing"
+		die "initrd has generic root-mount logic; use the Proxmox installer initrd instead: $initrd"
+	fi
+	rm -f -- "$listing"
+	printf 'Installer initrd: Proxmox ISO init detected (%s)\n' "$initrd"
+}
+
 append_el2_grub_entries() {
 	local grub_cfg=$1
 
@@ -991,6 +1012,7 @@ main() {
 	if [[ "$INCLUDE_MODULES" -eq 1 ]]; then
 		augment_initrd_with_modules "$STAGE_DIR/boot/initrd.img"
 	fi
+	verify_proxmox_installer_initrd "$STAGE_DIR/boot/initrd.img"
 	patch_grub_config "$STAGE_DIR/boot/grub/grub.cfg" "$DTB_NAME"
 	if [[ -n "$EL2_DTB_FILE" ]]; then
 		remove_existing_el2_grub_entries "$STAGE_DIR/boot/grub/grub.cfg"
