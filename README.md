@@ -123,7 +123,6 @@ loader, and `--firmware-tree` copies an additional firmware tree into the EFI
 image. It is not started by default: use `--load-qebspil` only after validating
 the basic EL2 path on the target device. The normal EL1 DTB remains separate so non-KVM boots and hardware
 variants can continue to use their own menu entries. The ISO KVM entries
-variants can continue to use their own menu entries. The ISO KVM entries
 chainload a Secure Launch bridge on the El Torito FAT volume, then boot the
 selected EL2 DTB and installer initramfs; they do not rely on a writable GRUB
 environment. The EFI launcher and its Secure Launch/standalone-GRUB payload
@@ -237,3 +236,20 @@ Fingerprint userspace setup (libfprint patch, fprintd) is documented in
 Qualcomm firmware files are listed with SHA256 hashes in
 `drivers/firmware-manifest.json`. This repo does not ship them - check your
 redistribution rights before publishing binaries.
+
+### Live Surface boot comparison (2026-09-07)
+
+SSH confirmed all CPUs started at EL2, VHE initialized, and `/dev/kvm` exists.
+The working ESP is `/dev/sda2` (UUID `584B-B4D4`); its root is `/dev/sda3`.
+EFI variables are unavailable in that running kernel, so Boot#### entries
+could not be read. The running kernel loads from the ESP with the clock,
+power-domain, and ECV arguments used by the ISO KVM entry.
+
+`tools/build-surface-el2-from-ready.sh` now reproduces the working DTB hash
+`87c1fd36a4a445c990fa8eb07125f0e7d580c6a4a850184492fc099dc30b33bd`:
+ADSP, CDSP and sound are disabled; backlight levels and default brightness
+match the live system. UFS stays enabled unless `--disable-ufs` is selected.
+The ISO menu declares and exports its own EFI image UUID rather than relying
+on variables set by an earlier GRUB configuration. UUID lookup and chainload
+must succeed before `boot` is issued. Installed root/ESP UUIDs are not used
+in the installer boot path.

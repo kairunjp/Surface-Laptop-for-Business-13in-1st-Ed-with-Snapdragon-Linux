@@ -508,10 +508,20 @@ entries = f"""
         echo    'Entering Surface EL2/KVM Secure Launch without UFS ...'
         insmod  chain
         search  --no-floppy --file --set=iso_root /boot/linux26
-        search  --no-floppy --fs-uuid --set=fat_root $surface_fat_uuid
+        insmod part_gpt
+        insmod fat
+        insmod search_fs_uuid
+        unset fat_root
+        if search  --no-floppy --fs-uuid --set=fat_root $surface_fat_uuid; then
         set root=$iso_root
-        chainloader ($fat_root)/EFI/BOOT/surface-kvm-entry-without-ufs.efi
+        if chainloader ($fat_root)/EFI/BOOT/surface-kvm-entry-without-ufs.efi; then
         boot
+        else
+            echo 'surface-kvm: USB EFI launcher load failed'
+        fi
+    else
+        echo 'surface-kvm: USB EFI UUID not found; launch cancelled'
+    fi
     }}
 
     menuentry 'Install Proxmox VE (Terminal UI, Surface EL2/KVM, without UFS)' --id surface-el2-kvm-without-ufs-terminal --class debian --class gnu-linux --class gnu --class os {{
@@ -519,10 +529,20 @@ entries = f"""
         echo    'Entering Surface EL2/KVM console Secure Launch without UFS ...'
         insmod  chain
         search  --no-floppy --file --set=iso_root /boot/linux26
-        search  --no-floppy --fs-uuid --set=fat_root $surface_fat_uuid
+        insmod part_gpt
+        insmod fat
+        insmod search_fs_uuid
+        unset fat_root
+        if search  --no-floppy --fs-uuid --set=fat_root $surface_fat_uuid; then
         set root=$iso_root
-        chainloader ($fat_root)/EFI/BOOT/surface-kvm-entry-without-ufs-terminal.efi
+        if chainloader ($fat_root)/EFI/BOOT/surface-kvm-entry-without-ufs-terminal.efi; then
         boot
+        else
+            echo 'surface-kvm: USB EFI launcher load failed'
+        fi
+    else
+        echo 'surface-kvm: USB EFI UUID not found; launch cancelled'
+    fi
     }}
 """
 lines[end:end] = [entries]
@@ -532,6 +552,12 @@ PY
 
 append_el2_grub_entries() {
 	local grub_cfg=$1
+	local fat_uuid
+	fat_uuid=$(blkid -s UUID -o value "$STAGE_DIR/efi.img")
+	[[ "$fat_uuid" =~ ^[[:xdigit:]]{4}-[[:xdigit:]]{4}$ ]] || die "Invalid USB EFI UUID"
+	# The official GRUB may enter the ISO config without sourcing FAT grub.cfg.
+	# Put the USB identity in the actual menu and export it into submenus.
+	sed -i "1i set surface_fat_uuid=$fat_uuid\nexport surface_fat_uuid" "$grub_cfg"
 	append_el2_without_ufs_advanced_entries "$grub_cfg"
 
 	cat >>"$grub_cfg" <<EOF
@@ -548,10 +574,20 @@ menuentry 'Install Proxmox VE (Graphical, Surface EL2/KVM)' --id surface-el2-kvm
 	    echo    'Entering Surface EL2/KVM Secure Launch ...'
 	    insmod  chain
 	    search  --no-floppy --file --set=iso_root /boot/linux26
-    search  --no-floppy --fs-uuid --set=fat_root \$surface_fat_uuid
+    insmod part_gpt
+    insmod fat
+    insmod search_fs_uuid
+    unset fat_root
+    if search  --no-floppy --fs-uuid --set=fat_root \$surface_fat_uuid; then
     set root=\$iso_root
-    chainloader (\$fat_root)/EFI/BOOT/surface-kvm-entry.efi
+    if chainloader (\$fat_root)/EFI/BOOT/surface-kvm-entry.efi; then
 	    boot
+        else
+            echo 'surface-kvm: USB EFI launcher load failed'
+        fi
+    else
+        echo 'surface-kvm: USB EFI UUID not found; launch cancelled'
+    fi
 }
 
 menuentry 'Install Proxmox VE (Terminal UI, Surface EL2/KVM)' --id surface-el2-kvm-terminal --class debian --class gnu-linux --class gnu --class os {
@@ -559,10 +595,20 @@ menuentry 'Install Proxmox VE (Terminal UI, Surface EL2/KVM)' --id surface-el2-k
 	    echo    'Entering Surface EL2/KVM Secure Launch ...'
 	    insmod  chain
 	    search  --no-floppy --file --set=iso_root /boot/linux26
-    search  --no-floppy --fs-uuid --set=fat_root \$surface_fat_uuid
+    insmod part_gpt
+    insmod fat
+    insmod search_fs_uuid
+    unset fat_root
+    if search  --no-floppy --fs-uuid --set=fat_root \$surface_fat_uuid; then
     set root=\$iso_root
-    chainloader (\$fat_root)/EFI/BOOT/surface-kvm-entry-terminal.efi
+    if chainloader (\$fat_root)/EFI/BOOT/surface-kvm-entry-terminal.efi; then
 	    boot
+        else
+            echo 'surface-kvm: USB EFI launcher load failed'
+        fi
+    else
+        echo 'surface-kvm: USB EFI UUID not found; launch cancelled'
+    fi
 }
 EOF
 
@@ -573,10 +619,20 @@ menuentry 'Install Proxmox VE (Surface EL2/KVM via EFI Shell)' --id surface-el2-
     echo    'Entering Surface EL2/KVM via EFI Shell ...'
     insmod  chain
     search  --no-floppy --file --set=iso_root /boot/linux26
-    search  --no-floppy --fs-uuid --set=fat_root \$surface_fat_uuid
+    insmod part_gpt
+    insmod fat
+    insmod search_fs_uuid
+    unset fat_root
+    if search  --no-floppy --fs-uuid --set=fat_root \$surface_fat_uuid; then
     set root=\$iso_root
-    chainloader (\$fat_root)/EFI/BOOT/surface-kvm-shell-bridge.efi
+    if chainloader (\$fat_root)/EFI/BOOT/surface-kvm-shell-bridge.efi; then
     boot
+        else
+            echo 'surface-kvm: USB EFI launcher load failed'
+        fi
+    else
+        echo 'surface-kvm: USB EFI UUID not found; launch cancelled'
+    fi
 }
 
 menuentry 'Install Proxmox VE (Graphical, EL2/KVM after EFI Shell)' --id surface-el2-kvm-shell-graphical --class debian --class gnu-linux --class gnu --class os {

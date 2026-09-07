@@ -56,6 +56,12 @@ if (( disable_ufs )); then
 	overlays+=("$work/ufs-disabled.dtbo")
 fi
 fdtoverlay -i "$work/ready.dtb" -o "$output" "${overlays[@]}"
+# Match the EL2 DTB verified on surface-pve on 2026-09-07.
+for node in /soc@0/remoteproc@6800000 /soc@0/remoteproc@32300000 /sound; do
+    fdtput -t s "$output" "$node" status disabled
+done
+fdtput -t i "$output" /backlight brightness-levels 0 4 8 16 32 64 96 128 160 192 224 255
+fdtput -t i "$output" /backlight default-brightness-level 9
 [[ $(fdtget "$output" /chosen dtbhack-el2-overlay) == x1p42100-el2 ]]
 [[ $(fdtget "$output" /soc@0/gpu@3d00000/zap-shader status) == disabled ]]
 [[ $(fdtget "$output" /soc@0/watchdog@1c840000 status) == disabled ]]
