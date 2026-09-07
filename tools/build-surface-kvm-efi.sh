@@ -11,6 +11,7 @@ SLBOUNCE_PATCH=${SLBOUNCE_PATCH:-$ROOT_DIR/tools/slbounce-x1p42100-safe-ebs.patc
 QEBSPIL_EFI=${QEBSPIL_EFI:-}
 QEBSPIL_SOURCE=${QEBSPIL_SOURCE:-}
 LOAD_QEBSPIL=${LOAD_QEBSPIL:-0}
+SURFACE_KVM_ISO_ONLY=${SURFACE_KVM_ISO_ONLY:-0}
 ALLOW_UNTESTED_TCB=${ALLOW_UNTESTED_TCB:-0}
 FIRMWARE_TREE=${FIRMWARE_TREE:-}
 EL2_DTB=${EL2_DTB:-}
@@ -85,6 +86,8 @@ Options:
   -h, --help            Show this help.
 
 GNUEFI_DIR and CROSS_COMPILE may also be supplied through the environment.
+SURFACE_KVM_ISO_ONLY=1 restricts the loader to a marked installer volume;
+never use that variant for the installed-system bundle.
 EOF
 }
 
@@ -256,6 +259,9 @@ build_loader_variant() {
 	)
 	if [[ "$LOAD_QEBSPIL" -eq 1 ]]; then
 		cflags+=(-DSURFACE_KVM_LOAD_QEBSPIL)
+	fi
+	if [[ "$SURFACE_KVM_ISO_ONLY" == 1 ]]; then
+		cflags+=(-DSURFACE_KVM_ISO_ONLY)
 	fi
 	if [[ -n "$dtb_define" ]]; then
 		cflags+=("$dtb_define")
@@ -533,6 +539,10 @@ main() {
 		fi
 	fi
 	copy_efi_file "$TCBLAUNCH" /tcblaunch.exe
+	if [[ "$SURFACE_KVM_ISO_ONLY" == 1 ]]; then
+		printf 'Surface USB installer payload v15\n' >"$WORK_DIR/installer.marker"
+		copy_efi_file "$WORK_DIR/installer.marker" /surface-kvm-installer.marker
+	fi
 	if [[ -n "$QEBSPIL_EFI" ]]; then
 		copy_efi_file "$QEBSPIL_EFI" /EFI/BOOT/qebspilaa64.efi
 	fi

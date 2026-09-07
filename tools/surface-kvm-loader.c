@@ -128,6 +128,9 @@ static EFI_STATUS payload_status(EFI_HANDLE device, CHAR16 *grub_filename,
 {
 	EFI_STATUS status;
 	CHAR16 *required[] = {
+#ifdef SURFACE_KVM_ISO_ONLY
+		L"\\surface-kvm-installer.marker",
+#endif
 		L"\\EFI\\BOOT\\slbounceaa64.efi",
 		L"\\tcblaunch.exe",
 #ifdef SURFACE_KVM_START_SHELL
@@ -154,6 +157,9 @@ static EFI_STATUS payload_status(EFI_HANDLE device, CHAR16 *grub_filename,
 
 	status = volume_file_status(device, grub_filename);
 	if (status == EFI_NOT_FOUND) {
+#ifdef SURFACE_KVM_ISO_ONLY
+		return status;
+#endif
 		/* The installer image continues through the original shim. */
 		status = volume_file_status(device, L"\\EFI\\BOOT\\shimaa64.efi");
 		if (!EFI_ERROR(status))
@@ -198,6 +204,7 @@ static EFI_STATUS find_payload_device(EFI_HANDLE preferred, CHAR16 *grub_filenam
 	status = EFI_NOT_FOUND;
 	for (index = 0; index < handle_count; index++) {
 		if (!EFI_ERROR(payload_status(handles[index], grub_filename, dtb_filename))) {
+			print_device_path(L"complete payload candidate", DevicePathFromHandle(handles[index]));
 			*result = handles[index];
 			matches++;
 		}
@@ -308,11 +315,14 @@ static EFI_STATUS start_image_from_volume(EFI_HANDLE parent,
 	status = uefi_call_wrapper(BS->LoadImage, 6, FALSE, parent, path,
 					   NULL, 0, &child);
 	FreePool(path);
-	if (EFI_ERROR(status))
+	if (EFI_ERROR(status)) {
+		Print(L"surface-kvm: LoadImage(%s): %r\n", filename, status);
 		return status;
+	}
 
 	status = uefi_call_wrapper(BS->StartImage, 3, child,
 					   &exit_data_size, &exit_data);
+	Print(L"surface-kvm: StartImage(%s) returned: %r\n", filename, status);
 	if (exit_data) {
 		Print(L"%s\n", exit_data);
 		FreePool(exit_data);
@@ -334,6 +344,9 @@ EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *system_table)
 	CHAR16 *dtb_filename = L"\\surface-laptop-13-el2.dtb";
 
 	InitializeLib(image, system_table);
+#ifdef SURFACE_KVM_ISO_ONLY
+	Print(L"surface-kvm: installer-only launcher v15 entered\n");
+#endif
 
 	status = uefi_call_wrapper(BS->HandleProtocol, 3, image,
 					   &loaded_image_guid,
@@ -355,6 +368,7 @@ EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *system_table)
 					     dtb_filename, &device);
 	if (EFI_ERROR(status)) {
 		Print(L"surface-kvm: payload volume not found: %r\n", status);
+		uefi_call_wrapper(BS->Stall, 1, 10000000);
 		return status;
 	}
 	print_device_path(L"selected payload device", DevicePathFromHandle(device));

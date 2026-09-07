@@ -261,3 +261,15 @@ caused USB EFI UUID lookup to fail in v13 despite correct files inside the
 ISO. `tools/verify-iso-esp.py` checks both GPT headers, partition-array CRCs,
 the backup header location, and the ESP bytes at the GPT-specified offset
 against the extracted `efi.img`. The build fails on a mismatch.
+
+For installer EFI images build with `SURFACE_KVM_ISO_ONLY=1`. This variant
+requires `/surface-kvm-installer.marker` on the candidate filesystem and
+requires its standalone KVM GRUB (no installed-shim fallback). The marker
+is created by the EFI builder and remains inside the ISO's FAT image.
+This excludes an installed PVE ESP from the loader's fallback volume scan
+when GRUB passes a device handle without the partition filesystem protocol.
+Multiple marked volumes are still rejected rather than choosing arbitrarily.
+The menu switches to text output before chainloading; loader entry, candidate
+paths, and LoadImage/StartImage failures are printed to distinguish a firmware
+mapping failure from a payload-selection failure. The reported r=17 alone
+does not establish which stage returned EFI_NO_MAPPING.

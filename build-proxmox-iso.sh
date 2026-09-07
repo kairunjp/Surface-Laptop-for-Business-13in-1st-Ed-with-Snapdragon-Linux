@@ -514,6 +514,7 @@ entries = f"""
         unset fat_root
         if search  --no-floppy --fs-uuid --set=fat_root $surface_fat_uuid; then
         set root=$iso_root
+        terminal_output console
         if chainloader ($fat_root)/EFI/BOOT/surface-kvm-entry-without-ufs.efi; then
         boot
         else
@@ -535,6 +536,7 @@ entries = f"""
         unset fat_root
         if search  --no-floppy --fs-uuid --set=fat_root $surface_fat_uuid; then
         set root=$iso_root
+        terminal_output console
         if chainloader ($fat_root)/EFI/BOOT/surface-kvm-entry-without-ufs-terminal.efi; then
         boot
         else
@@ -580,6 +582,7 @@ menuentry 'Install Proxmox VE (Graphical, Surface EL2/KVM)' --id surface-el2-kvm
     unset fat_root
     if search  --no-floppy --fs-uuid --set=fat_root \$surface_fat_uuid; then
     set root=\$iso_root
+    terminal_output console
     if chainloader (\$fat_root)/EFI/BOOT/surface-kvm-entry.efi; then
 	    boot
         else
@@ -601,6 +604,7 @@ menuentry 'Install Proxmox VE (Terminal UI, Surface EL2/KVM)' --id surface-el2-k
     unset fat_root
     if search  --no-floppy --fs-uuid --set=fat_root \$surface_fat_uuid; then
     set root=\$iso_root
+    terminal_output console
     if chainloader (\$fat_root)/EFI/BOOT/surface-kvm-entry-terminal.efi; then
 	    boot
         else
@@ -625,6 +629,7 @@ menuentry 'Install Proxmox VE (Surface EL2/KVM via EFI Shell)' --id surface-el2-
     unset fat_root
     if search  --no-floppy --fs-uuid --set=fat_root \$surface_fat_uuid; then
     set root=\$iso_root
+    terminal_output console
     if chainloader (\$fat_root)/EFI/BOOT/surface-kvm-shell-bridge.efi; then
     boot
         else
