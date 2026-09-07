@@ -138,7 +138,8 @@ firmware needs a platform-specific EL2 command line.
 For firmware which does not reliably expose the ISO9660 filesystem to GRUB,
 pass `--fat-boot`. This creates a 256 MiB El Torito FAT image containing the
 kernel, installer initramfs, both DTBs, and the complete Secure Launch chain.
-The normal Proxmox shim and GRUB binaries are retained, while the FAT GRUB menu
+The normal Proxmox shim is retained. The first GRUB embeds the FAT menu so it
+cannot redirect to the stock ISO menu, which has no Secure Launch entries. That menu
 loads every boot file relative to the USB device from which it was started; it
 performs no internal-disk, partition, label, UUID, or marker search. Its KVM
 entry follows the installed Surface sequence (`surface-kvm-entry.efi`,

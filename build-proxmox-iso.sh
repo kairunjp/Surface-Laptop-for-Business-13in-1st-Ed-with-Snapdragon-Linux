@@ -652,11 +652,10 @@ build_fatboot_efi_image() {
 	grubenv="$payload_dir/grubenv"
 	grub-editenv "$grubenv" create
 
-	# Retain the shim and GRUB binaries from the known-good Proxmox EFI image.
-	# Only their external configuration changes for this search-free layout.
+	# Retain shim. Build the first GRUB with its own menu below: the stock
+	# Proxmox GRUB may load /boot/grub instead of the adjacent FAT grub.cfg.
 	mcopy -i "$source_image" ::/EFI/BOOT/BOOTAA64.EFI "$payload_dir/BOOTAA64.EFI" >/dev/null
 	mcopy -i "$source_image" ::/EFI/BOOT/shimaa64.efi "$payload_dir/shimaa64.efi" >/dev/null
-	mcopy -i "$source_image" ::/EFI/BOOT/grubaa64.efi "$payload_dir/grubaa64.efi" >/dev/null
 	mcopy -i "$source_image" ::/EFI/BOOT/surface-kvm-entry.efi "$payload_dir/surface-kvm-entry.efi" >/dev/null
 	mcopy -i "$source_image" ::/EFI/BOOT/slbounceaa64.efi "$payload_dir/slbounceaa64.efi" >/dev/null
 	mcopy -i "$source_image" ::/tcblaunch.exe "$payload_dir/tcblaunch.exe" >/dev/null
@@ -676,6 +675,7 @@ insmod loadenv
 insmod linux
 insmod fdt
 echo "surface-kvm: USB boot device cmdpath=$cmdpath"
+echo 'Surface USB installer menu v5 - EL2/KVM and Ready'
 
 # Match the installed Surface KVM trial: after handing off to Secure Launch,
 # the next USB boot is Ready.  The environment is on the USB FAT volume, so
@@ -733,6 +733,10 @@ menuentry 'Install Proxmox VE - Surface Laptop 13 (FUSE/PVE ready, terminal)' --
 }
 EOF
 	grub-script-check "$cfg"
+	local menu_grub_dir=${GRUB_MODULE_DIR:-$STAGE_DIR/boot/grub/arm64-efi}
+	grub-mkstandalone -d "$menu_grub_dir" -O arm64-efi --disable-shim-lock \
+		--modules='normal configfile echo test part_gpt fat chain loadenv linux fdt reboot efi_gop' \
+		-o "$payload_dir/grubaa64.efi" "/boot/grub/grub.cfg=$cfg"
 
 	log "Building search-free self-contained EFI FAT boot image"
 	rm -f -- "$output_image"
@@ -977,6 +981,9 @@ verify_iso() {
 		7z l -slt "$efi_image" >"$efi_listing"
 		7z e -so "$efi_image" EFI/BOOT/grub.cfg >"$efi_cfg" || die "output ISO EFI GRUB config is missing"
 		if [[ "$FAT_BOOT" -eq 1 ]]; then
+			7z e -so "$efi_image" EFI/BOOT/grubaa64.efi | python3 -c \
+				'import sys; data=sys.stdin.buffer.read(); sys.exit(0 if b"Surface USB installer menu v5" in data and b"menuentry" in data and b"surface-fat-kvm-graphical" in data else 1)' ||
+				die "first-stage GRUB does not embed the USB KVM menu"
 			for required in \
 				EFI/BOOT/surface-kvm-entry.efi \
 				EFI/BOOT/surface-kvm-grubaa64.efi \
