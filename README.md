@@ -139,9 +139,12 @@ For firmware which does not reliably expose the ISO9660 filesystem to GRUB,
 pass `--fat-boot`. This creates a 256 MiB El Torito FAT image containing the
 kernel, installer initramfs, both DTBs, and the complete Secure Launch chain.
 The normal Proxmox shim and GRUB binaries are retained, while the FAT GRUB menu
-loads every boot file relative to its own `$cmdpath`; it performs no disk,
-partition, label, UUID, or marker search. The direct FAT menu keeps both KVM
-and PVE Ready installer entries, with KVM selected by default.
+loads every boot file relative to the USB device from which it was started; it
+performs no internal-disk, partition, label, UUID, or marker search. Its KVM
+entry follows the installed Surface sequence (`surface-kvm-entry.efi`,
+slbounce, then the standalone KVM GRUB), and saves a Ready entry on the USB
+FAT environment as the one-shot fallback. The menu keeps both KVM and PVE
+Ready installer entries, with KVM selected by default on the first USB boot.
 
 For an installed system, use `tools/installed-grub-surface-laptop-13` as the
 custom `/etc/grub.d/01_surface-laptop-13`. It arms `surface-el1-ready` before

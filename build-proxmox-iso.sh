@@ -18,7 +18,11 @@ EL2_DTB_NAME=${EL2_DTB_NAME:-surface-laptop-13-el2.dtb}
 # X1P42100 EL2 needs the clocks and power domains left on across the handoff.
 # Keep this overridable for other Qualcomm platforms with different firmware
 # ownership rules.
-EL2_KERNEL_ARGS=${EL2_KERNEL_ARGS:-"clk_ignore_unused pd_ignore_unused console=tty0 usbcore.autosuspend=-1 id_aa64mmfr0.ecv=1"}
+# Keep the USB installer KVM handoff identical to the known-good installed
+# Surface entry.  The verbose/no-auto-reboot options are intentional: if EL2
+# fails, the display remains available long enough to show the failure and the
+# outer USB GRUB can select Ready on the next boot.
+EL2_KERNEL_ARGS=${EL2_KERNEL_ARGS:-"clk_ignore_unused pd_ignore_unused console=tty0 usbcore.autosuspend=-1 id_aa64mmfr0.ecv=1 loglevel=7 ignore_loglevel panic=-1"}
 KERNEL_APPLY_PATCHES=${KERNEL_APPLY_PATCHES:-1}
 BUILD_MISSING=1
 INCLUDE_MODULES=1
@@ -431,13 +435,16 @@ build_standalone_kvm_grub() {
 	fi
 
 	if [[ "$payload_mode" == fat ]]; then
-		modules+=' fat'
+		modules+=' part_gpt fat regexp reboot sleep'
 		cat >"$config" <<EOF
 set timeout=0
-echo 'Loading Surface EL2/KVM installer from the EFI FAT volume ...'
+echo 'surface-kvm: starting USB KVM GRUB'
+echo "surface-kvm: prefix=\$prefix cmdpath=\$cmdpath"
 set surface_kernel="\$cmdpath/surface-kvm-linux"
 set surface_dtb="\$cmdpath/surface-laptop-13-el2.dtb"
 set surface_initrd="\$cmdpath/surface-kvm-initrd.img"
+if regexp --set=1:surface_usb_device '^(\([^)]*\))' "\$cmdpath"; then
+    echo "surface-kvm: USB device=\$surface_usb_device"
 if ! [ -s "\$surface_kernel" ]; then
     echo 'surface-kvm: FAT kernel missing or empty'
     halt
@@ -454,6 +461,14 @@ linux "\$surface_kernel" ro ramdisk_size=16777216 rw quiet splash=silent $EL2_KE
 devicetree "\$surface_dtb"
 initrd "\$surface_initrd"
 boot
+echo 'surface-kvm: boot returned without starting Linux'
+else
+    echo 'surface-kvm: current boot path is not a USB FAT device'
+fi
+echo 'surface-kvm: KVM failed; returning to USB Ready entry in 10 seconds'
+sleep 10
+reboot
+halt
 EOF
 	else
 		modules+=' iso9660 search_fs_file'
@@ -483,10 +498,12 @@ EOF
 build_fatboot_efi_image() {
 	local source_image=$1
 	local output_image=$2
-	local payload_dir cfg
+	local payload_dir cfg grubenv
 
 	payload_dir=$(mktemp -d "$WORK_DIR/fatboot-payload.XXXXXX")
 	cfg="$payload_dir/grub.cfg"
+	grubenv="$payload_dir/grubenv"
+	grub-editenv "$grubenv" create
 
 	# Retain the shim and GRUB binaries from the known-good Proxmox EFI image.
 	# Only their external configuration changes for this search-free layout.
@@ -505,31 +522,61 @@ set timeout=10
 set default=surface-fat-kvm-graphical
 terminal_input console
 terminal_output console
+insmod part_gpt
+insmod fat
+insmod chain
+insmod loadenv
+insmod linux
+insmod fdt
+echo "surface-kvm: USB boot device cmdpath=$cmdpath"
+
+# Match the installed Surface KVM trial: after handing off to Secure Launch,
+# the next USB boot is Ready.  The environment is on the USB FAT volume, so
+# this state cannot redirect firmware to the installed internal PVE disk.
+if [ -s "$cmdpath/grubenv" ]; then
+    load_env -f "$cmdpath/grubenv"
+    if [ "$next_entry" = "surface-fat-ready-graphical" ]; then
+        set default=surface-fat-ready-graphical
+    fi
+fi
 
 menuentry 'Install Proxmox VE (Graphical, Surface EL2/KVM, direct FAT)' --id surface-fat-kvm-graphical {
-    echo 'Starting Surface EL2/KVM from the EFI FAT volume ...'
+    echo 'Entering Surface EL2/KVM Secure Launch from the USB FAT volume ...'
+    set next_entry=surface-fat-ready-graphical
+    if save_env -f "$cmdpath/grubenv" next_entry; then
     chainloader "$cmdpath/surface-kvm-entry.efi"
     boot
-    echo 'surface-kvm: launcher returned; reboot before using Ready'
-    reboot
+        echo 'surface-kvm: launcher returned; rebooting to USB Ready'
+        reboot
+    else
+        echo 'surface-kvm: cannot save USB Ready fallback; launch cancelled'
+    fi
 }
 
 menuentry 'Install Proxmox VE (Terminal UI, Surface EL2/KVM, direct FAT)' --id surface-fat-kvm-terminal {
-    echo 'Starting Surface EL2/KVM terminal installer from the EFI FAT volume ...'
+    echo 'Entering Surface EL2/KVM Secure Launch from the USB FAT volume ...'
+    set next_entry=surface-fat-ready-terminal
+    if save_env -f "$cmdpath/grubenv" next_entry; then
     chainloader "$cmdpath/surface-kvm-entry-terminal.efi"
     boot
-    echo 'surface-kvm: launcher returned; reboot before using Ready'
-    reboot
+        echo 'surface-kvm: launcher returned; rebooting to USB Ready'
+        reboot
+    else
+        echo 'surface-kvm: cannot save USB Ready fallback; launch cancelled'
+    fi
 }
 
-menuentry 'Install Proxmox VE (Graphical, Surface PVE Ready, direct FAT)' --id surface-fat-ready-graphical {
+menuentry 'Install Proxmox VE - Surface Laptop 13 (FUSE/PVE ready)' --id surface-fat-ready-graphical {
+    echo 'Loading Surface PVE Ready from the USB FAT volume ...'
     linux "$cmdpath/surface-kvm-linux" ro ramdisk_size=16777216 rw quiet splash=silent
     devicetree "$cmdpath/surface-laptop-13-current.dtb"
     initrd "$cmdpath/surface-kvm-initrd.img"
     boot
 }
 
-menuentry 'Install Proxmox VE (Terminal UI, Surface PVE Ready, direct FAT)' --id surface-fat-ready-terminal {
+menuentry 'Install Proxmox VE - Surface Laptop 13 (FUSE/PVE ready, terminal)' --id surface-fat-ready-terminal {
+    set background_color=black
+    echo 'Loading Surface PVE Ready terminal from the USB FAT volume ...'
     linux "$cmdpath/surface-kvm-linux" ro ramdisk_size=16777216 rw quiet splash=silent proxtui
     devicetree "$cmdpath/surface-laptop-13-current.dtb"
     initrd "$cmdpath/surface-kvm-initrd.img"
@@ -548,6 +595,7 @@ EOF
 	mcopy -i "$output_image" -o "$payload_dir/shimaa64.efi" ::/EFI/BOOT/shimaa64.efi >/dev/null
 	mcopy -i "$output_image" -o "$payload_dir/grubaa64.efi" ::/EFI/BOOT/grubaa64.efi >/dev/null
 	mcopy -i "$output_image" -o "$cfg" ::/EFI/BOOT/grub.cfg >/dev/null
+	mcopy -i "$output_image" -o "$grubenv" ::/EFI/BOOT/grubenv >/dev/null
 	mcopy -i "$output_image" -o "$payload_dir/surface-kvm-entry.efi" ::/EFI/BOOT/surface-kvm-entry.efi >/dev/null
 	mcopy -i "$output_image" -o "$payload_dir/surface-kvm-entry-terminal.efi" ::/EFI/BOOT/surface-kvm-entry-terminal.efi >/dev/null
 	mcopy -i "$output_image" -o "$payload_dir/slbounceaa64.efi" ::/EFI/BOOT/slbounceaa64.efi >/dev/null
@@ -830,6 +878,7 @@ main() {
 		need mformat
 		need mmd
 		need truncate
+		need grub-editenv
 	fi
 	if [[ -n "$EL2_DTB_FILE" ]]; then
 		need mdel
