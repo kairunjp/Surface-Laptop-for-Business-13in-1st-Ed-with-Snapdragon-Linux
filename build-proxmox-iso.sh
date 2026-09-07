@@ -636,7 +636,7 @@ verify_iso() {
 		efi_listing=$(mktemp "$WORK_DIR/iso-efi-list.XXXXXX")
 		7z e -so "$output_iso" efi.img >"$efi_image" || die "cannot extract output ISO EFI image"
 		7z l -slt "$efi_image" >"$efi_listing"
-		if grep -Eiq '^Path = .*(surface-kvm|slbounce|tcblaunch|surface-laptop-13-el2|startup\.nsh)' "$efi_listing"; then
+		if grep -Eiq '^Path = (EFI/(BOOT|PROXMOX)/.*(surface-kvm|slbounce|surface-laptop-13-el2)|surface-laptop-13-el2\.dtb|tcblaunch\.exe|startup\.nsh)' "$efi_listing"; then
 			die "output ISO EFI image still contains a duplicate Surface KVM payload"
 		fi
 		boot_hash=$(7z e -so "$efi_image" EFI/BOOT/BOOTAA64.EFI 2>/dev/null | sha256sum | cut -d ' ' -f1)
