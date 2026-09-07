@@ -1,0 +1,67 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+Subject: [PATCH] power: qcom_battmgr: refresh supplies after service startup
+
+The Qualcomm battery manager registers its power-supply devices before the
+PMIC GLINK protection-domain service is available.  This is required because
+notifications can race the service-state callback, but it means that the
+initial power-supply uevents can legitimately return -EAGAIN.  Proxmox's
+early udev scan writes ``change`` to each power-supply uevent file and turns
+that transient state into a visible error.
+
+Ignore -EAGAIN while constructing a power-supply uevent, then emit one complete
+change event after the battmgr notification request has succeeded.  The
+normal property reads continue to return -EAGAIN until the firmware is ready;
+no fake battery values are exposed.
+
+---
+ drivers/power/supply/power_supply_sysfs.c |  7 +++++--
+ drivers/power/supply/qcom_battmgr.c       | 16 ++++++++++++++++
+ 2 files changed, 21 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/power/supply/power_supply_sysfs.c b/drivers/power/supply/power_supply_sysfs.c
+--- a/drivers/power/supply/power_supply_sysfs.c
++++ b/drivers/power/supply/power_supply_sysfs.c
+@@ -539,10 +539,13 @@
+ 	dev_attr = &pwr_attr->dev_attr;
+ 
+ 	ret = power_supply_format_property((struct device *)dev, true, dev_attr, prop_buf);
+-	if (ret == -ENODEV || ret == -ENODATA || ret == -EINVAL) {
++	if (ret == -ENODEV || ret == -ENODATA || ret == -EINVAL || ret == -EAGAIN) {
+ 		/*
+ 		 * When a battery is absent, we expect -ENODEV. Don't abort;
+-		 * send the uevent with at least the PRESENT=0 property
++		 * send the uevent with at least the PRESENT=0 property.  A
++		 * Qualcomm PMIC GLINK service can also be temporarily unavailable
++		 * while it is starting; the next power-supply change event carries
++		 * the complete set of properties.
+ 		 */
+ 		return 0;
+ 	}
+diff --git a/drivers/power/supply/qcom_battmgr.c b/drivers/power/supply/qcom_battmgr.c
+--- a/drivers/power/supply/qcom_battmgr.c
++++ b/drivers/power/supply/qcom_battmgr.c
+@@ -1596,6 +1596,22 @@
+ 	ret = qcom_battmgr_request(battmgr, &req, sizeof(req));
+ 	if (ret)
+ 		dev_err(battmgr->dev, "failed to request power notifications\n");
++	else {
++		/*
++		 * The supplies are registered before the service comes up so that
++		 * early notifications cannot dereference NULL.  Refresh them after
++		 * notification delivery has been enabled, which also gives early
++		 * userspace a reliable initial battery/charger state.
++		 */
++		if (battmgr->bat_psy)
++			power_supply_changed(battmgr->bat_psy);
++		if (battmgr->ac_psy)
++			power_supply_changed(battmgr->ac_psy);
++		if (battmgr->usb_psy)
++			power_supply_changed(battmgr->usb_psy);
++		if (battmgr->wls_psy)
++			power_supply_changed(battmgr->wls_psy);
++	}
+ }
+ 
+ static void qcom_battmgr_pdr_notify(void *priv, int state)
+-- 
+2.50.1
