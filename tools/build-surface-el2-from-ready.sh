@@ -2,8 +2,13 @@
 # Apply only the EL2 overlay to the DTB actually used by the installed Ready entry.
 set -Eeuo pipefail
 ROOT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
-[[ $# == 2 ]] || { echo "Usage: $0 READY.dtb OUTPUT.dtb" >&2; exit 1; }
+[[ $# == 2 || $# == 3 ]] || { echo "Usage: $0 READY.dtb OUTPUT.dtb [--disable-ufs]" >&2; exit 1; }
 input=$1 output=$2
+disable_ufs=0
+if [[ $# == 3 ]]; then
+	[[ $3 == --disable-ufs ]] || { echo "Unknown option: $3" >&2; exit 1; }
+	disable_ufs=1
+fi
 mkdir -p "$(dirname -- "$output")"
 work=$(mktemp -d "$(dirname -- "$output")/el2-dtb.XXXXXX")
 trap 'rm -rf -- "$work"' EXIT
@@ -45,8 +50,17 @@ for label in labels:
         next_id += 1
 PY
 dtc -@ -I dts -O dtb -o "$work/el2.dtbo" "$ROOT_DIR/device-tree/overlays/x1e-el2.dtso"
-fdtoverlay -i "$work/ready.dtb" -o "$output" "$work/el2.dtbo"
+overlays=("$work/el2.dtbo")
+if (( disable_ufs )); then
+	dtc -@ -I dts -O dtb -o "$work/ufs-disabled.dtbo" "$ROOT_DIR/device-tree/overlays/ufs-disabled.dtso"
+	overlays+=("$work/ufs-disabled.dtbo")
+fi
+fdtoverlay -i "$work/ready.dtb" -o "$output" "${overlays[@]}"
 [[ $(fdtget "$output" /chosen dtbhack-el2-overlay) == x1p42100-el2 ]]
 [[ $(fdtget "$output" /soc@0/gpu@3d00000/zap-shader status) == disabled ]]
 [[ $(fdtget "$output" /soc@0/watchdog@1c840000 status) == disabled ]]
+if (( disable_ufs )); then
+	[[ $(fdtget "$output" /soc@0/phy@1d80000 status) == disabled ]]
+	[[ $(fdtget "$output" /soc@0/ufshc@1d84000 status) == disabled ]]
+fi
 sha256sum "$input" "$output"

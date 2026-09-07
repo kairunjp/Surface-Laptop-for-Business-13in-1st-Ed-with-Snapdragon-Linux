@@ -14,10 +14,11 @@ LOAD_QEBSPIL=${LOAD_QEBSPIL:-0}
 ALLOW_UNTESTED_TCB=${ALLOW_UNTESTED_TCB:-0}
 FIRMWARE_TREE=${FIRMWARE_TREE:-}
 EL2_DTB=${EL2_DTB:-}
+EL2_DTB_WITHOUT_UFS=${EL2_DTB_WITHOUT_UFS:-}
 SHELL_EFI=${SHELL_EFI:-}
 GNUEFI_DIR=${GNUEFI_DIR:-}
 WORK_DIR=${WORK_DIR:-$ROOT_DIR/build/.work/kvm-efi}
-IMAGE_SIZE=${IMAGE_SIZE:-32M}
+IMAGE_SIZE=${IMAGE_SIZE:-64M}
 CROSS_COMPILE=${CROSS_COMPILE:-aarch64-linux-gnu-}
 
 # This is the TCB build validated on the X1P42100 Surface platform.  Newer
@@ -74,9 +75,13 @@ Options:
   --allow-untested-tcb  Permit a TCB other than the X1P42100 validated build.
   --firmware-tree DIR   Optional firmware tree copied below /firmware.
   --el2-dtb FILE        Copy an EL2 DTB and build a chainloadable KVM launcher.
+  --without-ufs-dtb FILE
+                        Add a second launcher/DTB used only by the Advanced
+                        Options without-UFS entry.
   --shell FILE          Add an AArch64 UEFI Shell and startup.nsh KVM path.
   --work DIR            Build scratch directory.
-  --size SIZE           FAT image size accepted by truncate (default: 32M).
+  --size SIZE           FAT image size accepted by truncate (default: 64M;
+                        dual UFS-on/without-UFS KVM payloads need the space).
   -h, --help            Show this help.
 
 GNUEFI_DIR and CROSS_COMPILE may also be supplied through the environment.
@@ -121,6 +126,9 @@ parse_args() {
 				;;
 			--el2-dtb)
 				shift; (($#)) || die "--el2-dtb needs a file"; EL2_DTB=$1
+				;;
+			--without-ufs-dtb)
+				shift; (($#)) || die "--without-ufs-dtb needs a file"; EL2_DTB_WITHOUT_UFS=$1
 				;;
 			--shell)
 				shift; (($#)) || die "--shell needs a file"; SHELL_EFI=$1
@@ -426,6 +434,11 @@ main() {
 		EL2_DTB=$(absolute_path "$EL2_DTB")
 		[[ -f "$EL2_DTB" ]] || die "EL2 DTB not found: $EL2_DTB"
 	fi
+	if [[ -n "$EL2_DTB_WITHOUT_UFS" ]]; then
+		EL2_DTB_WITHOUT_UFS=$(absolute_path "$EL2_DTB_WITHOUT_UFS")
+		[[ -n "$EL2_DTB" ]] || die "--without-ufs-dtb requires --el2-dtb"
+		[[ -f "$EL2_DTB_WITHOUT_UFS" ]] || die "UFS-disabled EL2 DTB not found: $EL2_DTB_WITHOUT_UFS"
+	fi
 	if [[ -n "$SHELL_EFI" ]]; then
 		SHELL_EFI=$(absolute_path "$SHELL_EFI")
 		[[ -f "$SHELL_EFI" ]] || die "UEFI Shell binary not found: $SHELL_EFI"
@@ -512,6 +525,12 @@ main() {
 		# the FAT root used by the launcher and qebspil.
 		copy_efi_file "$EL2_DTB" /surface-laptop-13-el2.dtb
 		copy_efi_file "$EL2_DTB" /EFI/BOOT/surface-laptop-13-el2.dtb
+		if [[ -n "$EL2_DTB_WITHOUT_UFS" ]]; then
+			copy_efi_file "$el2_loader_efi" /EFI/BOOT/surface-kvm-entry-without-ufs.efi
+			copy_efi_file "$el2_loader_efi" /EFI/PROXMOX/surface-kvm-entry-without-ufs.efi
+			copy_efi_file "$EL2_DTB_WITHOUT_UFS" /surface-laptop-13-el2-without-ufs.dtb
+			copy_efi_file "$EL2_DTB_WITHOUT_UFS" /EFI/BOOT/surface-laptop-13-el2-without-ufs.dtb
+		fi
 	fi
 	copy_efi_file "$TCBLAUNCH" /tcblaunch.exe
 	if [[ -n "$QEBSPIL_EFI" ]]; then

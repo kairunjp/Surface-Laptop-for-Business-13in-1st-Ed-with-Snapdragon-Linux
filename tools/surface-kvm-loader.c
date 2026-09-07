@@ -123,15 +123,13 @@ static EFI_STATUS volume_file_status(EFI_HANDLE device, CHAR16 *filename)
 	return status;
 }
 
-static EFI_STATUS payload_status(EFI_HANDLE device, CHAR16 *grub_filename)
+static EFI_STATUS payload_status(EFI_HANDLE device, CHAR16 *grub_filename,
+					 CHAR16 *dtb_filename)
 {
 	EFI_STATUS status;
 	CHAR16 *required[] = {
 		L"\\EFI\\BOOT\\slbounceaa64.efi",
 		L"\\tcblaunch.exe",
-#ifdef SURFACE_KVM_INSTALL_DTB
-		L"\\surface-laptop-13-el2.dtb",
-#endif
 #ifdef SURFACE_KVM_START_SHELL
 		L"\\EFI\\BOOT\\surface-kvm-shell.efi",
 		L"\\startup.nsh",
@@ -147,6 +145,12 @@ static EFI_STATUS payload_status(EFI_HANDLE device, CHAR16 *grub_filename)
 		if (EFI_ERROR(status))
 			return status;
 	}
+
+#ifdef SURFACE_KVM_INSTALL_DTB
+	status = volume_file_status(device, dtb_filename);
+	if (EFI_ERROR(status))
+		return status;
+#endif
 
 	status = volume_file_status(device, grub_filename);
 	if (status == EFI_NOT_FOUND) {
@@ -168,7 +172,7 @@ static void print_device_path(CHAR16 *label, EFI_DEVICE_PATH *path)
 }
 
 static EFI_STATUS find_payload_device(EFI_HANDLE preferred, CHAR16 *grub_filename,
-					      EFI_HANDLE *result)
+					      CHAR16 *dtb_filename, EFI_HANDLE *result)
 {
 	EFI_GUID fs_guid = EFI_SIMPLE_FILE_SYSTEM_PROTOCOL_GUID;
 	EFI_HANDLE *handles = NULL;
@@ -181,7 +185,7 @@ static EFI_STATUS find_payload_device(EFI_HANDLE preferred, CHAR16 *grub_filenam
 		return EFI_INVALID_PARAMETER;
 	*result = NULL;
 
-	if (preferred && !EFI_ERROR(payload_status(preferred, grub_filename))) {
+	if (preferred && !EFI_ERROR(payload_status(preferred, grub_filename, dtb_filename))) {
 		*result = preferred;
 		return EFI_SUCCESS;
 	}
@@ -193,7 +197,7 @@ static EFI_STATUS find_payload_device(EFI_HANDLE preferred, CHAR16 *grub_filenam
 
 	status = EFI_NOT_FOUND;
 	for (index = 0; index < handle_count; index++) {
-		if (!EFI_ERROR(payload_status(handles[index], grub_filename))) {
+		if (!EFI_ERROR(payload_status(handles[index], grub_filename, dtb_filename))) {
 			*result = handles[index];
 			matches++;
 		}
@@ -212,7 +216,7 @@ static EFI_STATUS find_payload_device(EFI_HANDLE preferred, CHAR16 *grub_filenam
 }
 
 #ifdef SURFACE_KVM_INSTALL_DTB
-static EFI_STATUS install_el2_dtb(EFI_HANDLE device)
+static EFI_STATUS install_el2_dtb(EFI_HANDLE device, CHAR16 *dtb_filename)
 {
 	EFI_GUID fs_guid = EFI_SIMPLE_FILE_SYSTEM_PROTOCOL_GUID;
 	EFI_GUID dtb_guid = EFI_DTB_TABLE_GUID;
@@ -235,7 +239,7 @@ static EFI_STATUS install_el2_dtb(EFI_HANDLE device)
 		return status;
 
 	status = uefi_call_wrapper(volume->Open, 5, volume, &file,
-					   L"\\surface-laptop-13-el2.dtb",
+					   dtb_filename,
 					   EFI_FILE_MODE_READ, 0);
 	if (EFI_ERROR(status) || !file)
 		goto out;
@@ -327,6 +331,7 @@ EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *system_table)
 	EFI_HANDLE device = NULL;
 	EFI_STATUS status;
 	CHAR16 *grub_filename = L"\\EFI\\BOOT\\surface-kvm-grubaa64.efi";
+	CHAR16 *dtb_filename = L"\\surface-laptop-13-el2.dtb";
 
 	InitializeLib(image, system_table);
 
@@ -339,9 +344,15 @@ EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *system_table)
 	}
 	if (path_contains(loaded_image->FilePath, L"surface-kvm-entry-terminal"))
 		grub_filename = L"\\EFI\\BOOT\\surface-kvm-grub-terminal.efi";
+	if (path_contains(loaded_image->FilePath, L"surface-kvm-entry-without-ufs")) {
+		dtb_filename = L"\\surface-laptop-13-el2-without-ufs.dtb";
+		grub_filename = L"\\EFI\\BOOT\\surface-kvm-grub-without-ufs.efi";
+		if (path_contains(loaded_image->FilePath, L"surface-kvm-entry-without-ufs-terminal"))
+			grub_filename = L"\\EFI\\BOOT\\surface-kvm-grub-without-ufs-terminal.efi";
+	}
 	print_device_path(L"launcher device", DevicePathFromHandle(loaded_image->DeviceHandle));
 	status = find_payload_device(loaded_image->DeviceHandle, grub_filename,
-					     &device);
+					     dtb_filename, &device);
 	if (EFI_ERROR(status)) {
 		Print(L"surface-kvm: payload volume not found: %r\n", status);
 		return status;
@@ -372,7 +383,7 @@ EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *system_table)
 
 #ifdef SURFACE_KVM_INSTALL_DTB
 	write_state(device, (CHAR8 *)"dtb-start\n");
-	status = install_el2_dtb(device);
+	status = install_el2_dtb(device, dtb_filename);
 	if (EFI_ERROR(status)) {
 		write_state(device, (CHAR8 *)"dtb-fail\n");
 		Print(L"surface-kvm: EL2 DTB install failed: %r\n", status);

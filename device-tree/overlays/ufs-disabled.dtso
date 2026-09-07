@@ -1,0 +1,12 @@
+// SPDX-License-Identifier: BSD-3-Clause
+/* Keep the internal UFS SSD out of the EL2/KVM boot path. */
+/dts-v1/;
+/plugin/;
+
+&{/soc@0/phy@1d80000} {
+	status = "disabled";
+};
+
+&{/soc@0/ufshc@1d84000} {
+	status = "disabled";
+};

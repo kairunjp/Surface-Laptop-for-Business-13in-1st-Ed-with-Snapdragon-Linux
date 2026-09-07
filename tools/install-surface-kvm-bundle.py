@@ -25,6 +25,32 @@ def digest(path):
         return hashlib.file_digest(stream, 'sha256').hexdigest()
 
 
+def set_grub_default(path, entry):
+    """Make the requested installed GRUB menu id the persistent default."""
+    text = path.read_text() if path.exists() else ''
+    lines = text.splitlines()
+    replaced = False
+    output = []
+    for line in lines:
+        if re.match(r'^\s*GRUB_DEFAULT=', line):
+            if not replaced:
+                output.append(f'GRUB_DEFAULT={entry}')
+                replaced = True
+            continue
+        output.append(line)
+    if not replaced:
+        if output and output[-1] != '':
+            output.append('')
+        output.append(f'GRUB_DEFAULT={entry}')
+    new_text = '\n'.join(output) + '\n'
+    temporary = path.with_name(path.name + '.kvm-new')
+    temporary.write_text(new_text)
+    temporary.chmod(path.stat().st_mode & 0o777 if path.exists() else 0o644)
+    with temporary.open('rb') as stream:
+        os.fsync(stream.fileno())
+    os.replace(temporary, path)
+
+
 def main():
     if os.geteuid() or len(sys.argv) != 2:
         raise RuntimeError('Run as root with exactly one bundle directory')
@@ -69,9 +95,13 @@ def main():
         'surface-kvm-linux': ['boot/efi/EFI/BOOT/surface-kvm-linux', 'boot/efi/surface-kvm-linux', f'boot/vmlinuz-{version}-kvm'],
         'surface-kvm-initrd.img': ['boot/efi/EFI/BOOT/surface-kvm-initrd.img', 'boot/efi/surface-kvm-initrd.img', f'boot/initrd.img-{version}-kvm'],
         'surface-laptop-13-el2.dtb': ['boot/efi/EFI/BOOT/surface-laptop-13-el2.dtb', 'boot/efi/surface-laptop-13-el2.dtb', 'boot/surface-laptop-13-el2.dtb'],
+        'surface-laptop-13-el2-without-ufs.dtb': ['boot/efi/EFI/BOOT/surface-laptop-13-el2-without-ufs.dtb', 'boot/efi/surface-laptop-13-el2-without-ufs.dtb', 'boot/surface-laptop-13-el2-without-ufs.dtb'],
         'surface-kvm-entry.efi': ['boot/efi/EFI/BOOT/surface-kvm-entry.efi', 'boot/efi/EFI/BOOT/surface-kvm-entry-terminal.efi', 'boot/efi/EFI/proxmox/surface-kvm-entry.efi'],
+        'surface-kvm-entry-without-ufs.efi': ['boot/efi/EFI/BOOT/surface-kvm-entry-without-ufs.efi', 'boot/efi/EFI/proxmox/surface-kvm-entry-without-ufs.efi'],
         'surface-kvm-grubaa64.efi': ['boot/efi/EFI/BOOT/surface-kvm-grubaa64.efi', 'boot/efi/EFI/BOOT/surface-kvm-grub-terminal.efi'],
+        'surface-kvm-grub-without-ufs.efi': ['boot/efi/EFI/BOOT/surface-kvm-grub-without-ufs.efi'],
         'surface-kvm-grubaa64.cfg': ['boot/efi/EFI/BOOT/surface-kvm-grubaa64.cfg'],
+        'surface-kvm-grub-without-ufs.cfg': ['boot/efi/EFI/BOOT/surface-kvm-grub-without-ufs.cfg'],
         'slbounceaa64.efi': ['boot/efi/EFI/BOOT/slbounceaa64.efi'],
         'tcblaunch.exe': ['boot/efi/tcblaunch.exe'],
         'grub.cfg': ['boot/efi/EFI/BOOT/grub.cfg', 'boot/efi/EFI/proxmox/grub.cfg'],
@@ -115,6 +145,7 @@ def main():
             if digest(temporary) != manifest[source]:
                 raise RuntimeError(f'Staged hash mismatch: {temporary}')
             os.replace(temporary, destination)
+    set_grub_default(Path('/etc/default/grub'), 'surface-el2-kvm')
     run('update-grub')
     run('grub-script-check', '/boot/grub/grub.cfg')
     run('systemctl', 'daemon-reload')
@@ -135,7 +166,8 @@ def main():
             raise RuntimeError(f'Protected Ready component changed: {path}')
     (backup / 'deployed.json').write_text(json.dumps(report, indent=2) + '\n')
     print(json.dumps(report, indent=2))
-    print('Ready components unchanged; hashes verified. No reboot or default change performed.')
+    print('Ready components unchanged; hashes verified. KVM is the persistent default; '
+          'its one-shot failure fallback is surface-el1-ready. No reboot performed.')
     subprocess.run(['efibootmgr', '-v'], check=False)
 
 

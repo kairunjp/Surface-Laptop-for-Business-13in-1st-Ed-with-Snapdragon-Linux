@@ -16,6 +16,8 @@ WCN7850_FIRMWARE_SOURCE=${WCN7850_FIRMWARE_SOURCE:-}
 EFI_IMAGE=${EFI_IMAGE:-}
 EL2_DTB_FILE=${EL2_DTB_FILE:-}
 EL2_DTB_NAME=${EL2_DTB_NAME:-surface-laptop-13-el2.dtb}
+EL2_DTB_WITHOUT_UFS_FILE=${EL2_DTB_WITHOUT_UFS_FILE:-}
+EL2_DTB_WITHOUT_UFS_NAME=${EL2_DTB_WITHOUT_UFS_NAME:-surface-laptop-13-el2-without-ufs.dtb}
 # X1P42100 EL2 needs the clocks and power domains left on across the handoff.
 # Keep this overridable for other Qualcomm platforms with different firmware
 # ownership rules.
@@ -80,6 +82,12 @@ Options:
   --dtb-name NAME     Name of the DTB inside /boot (default: current DTB name).
   --el2-dtb FILE      Add a separate EL2/KVM DTB and installer menu entries.
   --el2-dtb-name NAME Name of the EL2 DTB inside /boot (default: surface-laptop-13-el2.dtb).
+  --el2-dtb-without-ufs FILE
+                      Add a UFS-disabled EL2 DTB to Advanced Options; the
+                      normal EL2/KVM entry continues to use --el2-dtb.
+  --el2-dtb-without-ufs-name NAME
+                      Name of the UFS-disabled DTB inside /boot (default:
+                      surface-laptop-13-el2-without-ufs.dtb).
   --efi-image FILE    Replace the ISO EFI image (required for --el2-dtb).
   --initrd FILE       Replace the ISO initrd with this archive.
   --lvm-module-tree DIR
@@ -148,6 +156,16 @@ parse_args() {
 				shift
 				(($#)) || die "--el2-dtb-name needs a name"
 				EL2_DTB_NAME=$1
+				;;
+			--el2-dtb-without-ufs)
+				shift
+				(($#)) || die "--el2-dtb-without-ufs needs a file"
+				EL2_DTB_WITHOUT_UFS_FILE=$1
+				;;
+			--el2-dtb-without-ufs-name)
+				shift
+				(($#)) || die "--el2-dtb-without-ufs-name needs a name"
+				EL2_DTB_WITHOUT_UFS_NAME=$1
 				;;
 			--efi-image)
 				shift
@@ -453,16 +471,86 @@ verify_proxmox_installer_initrd() {
 	printf 'Installer initrd: Proxmox ISO init and Surface LVM stack detected (%s)\n' "$initrd"
 }
 
+append_el2_without_ufs_advanced_entries() {
+	local grub_cfg=$1
+	[[ -n "$EL2_DTB_WITHOUT_UFS_FILE" ]] || return 0
+	python3 - "$grub_cfg" "$EL2_DTB_WITHOUT_UFS_NAME" "$EL2_KERNEL_ARGS" <<'PY'
+import pathlib
+import re
+import sys
+
+path = pathlib.Path(sys.argv[1])
+dtb_name = sys.argv[2]
+kernel_args = sys.argv[3]
+if 'module_blacklist=' not in kernel_args:
+    kernel_args += ' module_blacklist=ufs_qcom,phy_qcom_qmp_ufs'
+
+lines = path.read_text(encoding='utf-8').splitlines(keepends=True)
+start = None
+depth = 0
+end = None
+for index, line in enumerate(lines):
+    if start is None:
+        if re.match(r"^submenu\s+['\"]Advanced Options['\"]\s*\{", line):
+            start = index
+            depth = line.count('{') - line.count('}')
+        continue
+    depth += line.count('{') - line.count('}')
+    if depth == 0:
+        end = index
+        break
+
+if start is None or end is None:
+    raise SystemExit('Advanced Options submenu not found')
+
+entries = f"""
+    menuentry 'Install Proxmox VE (Graphical, Surface EL2/KVM, without UFS)' --id surface-el2-kvm-without-ufs-graphical --class debian --class gnu-linux --class gnu --class os {{
+        echo    'Entering Surface EL2/KVM Secure Launch without UFS ...'
+        insmod  chain
+        search  --no-floppy --file --set=iso_root /boot/linux26
+        search  --no-floppy --fs-uuid --set=fat_root $surface_fat_uuid
+        set root=$iso_root
+        chainloader ($fat_root)/EFI/BOOT/surface-kvm-entry-without-ufs.efi
+        boot
+    }}
+
+    menuentry 'Install Proxmox VE (Terminal UI, Surface EL2/KVM, without UFS)' --id surface-el2-kvm-without-ufs-terminal --class debian --class gnu-linux --class gnu --class os {{
+        set background_color=black
+        echo    'Entering Surface EL2/KVM console Secure Launch without UFS ...'
+        insmod  chain
+        search  --no-floppy --file --set=iso_root /boot/linux26
+        search  --no-floppy --fs-uuid --set=fat_root $surface_fat_uuid
+        set root=$iso_root
+        chainloader ($fat_root)/EFI/BOOT/surface-kvm-entry-without-ufs-terminal.efi
+        boot
+    }}
+"""
+lines[end:end] = [entries]
+path.write_text(''.join(lines), encoding='utf-8')
+PY
+}
+
 append_el2_grub_entries() {
 	local grub_cfg=$1
+	append_el2_without_ufs_advanced_entries "$grub_cfg"
 
 	cat >>"$grub_cfg" <<EOF
 
+# The first-stage official GRUB records the firmware-readable FAT volume
+# before it searches the ISO9660 volume.  EFI chainloader cannot load an
+# application directly from ISO9660 on this firmware, so the KVM bridge is
+# deliberately kept on that FAT volume.
+if [ x\${fat_root} = x ]; then
+    set fat_root=\$root
+fi
+set default=surface-el2-kvm-graphical
 menuentry 'Install Proxmox VE (Graphical, Surface EL2/KVM)' --id surface-el2-kvm-graphical --class debian --class gnu-linux --class gnu --class os {
 	    echo    'Entering Surface EL2/KVM Secure Launch ...'
 	    insmod  chain
 	    search  --no-floppy --file --set=iso_root /boot/linux26
-    chainloader (\$iso_root)/EFI/BOOT/surface-kvm-entry.efi
+    search  --no-floppy --fs-uuid --set=fat_root \$surface_fat_uuid
+    set root=\$iso_root
+    chainloader (\$fat_root)/EFI/BOOT/surface-kvm-entry.efi
 	    boot
 }
 
@@ -471,7 +559,9 @@ menuentry 'Install Proxmox VE (Terminal UI, Surface EL2/KVM)' --id surface-el2-k
 	    echo    'Entering Surface EL2/KVM Secure Launch ...'
 	    insmod  chain
 	    search  --no-floppy --file --set=iso_root /boot/linux26
-    chainloader (\$iso_root)/EFI/BOOT/surface-kvm-entry-terminal.efi
+    search  --no-floppy --fs-uuid --set=fat_root \$surface_fat_uuid
+    set root=\$iso_root
+    chainloader (\$fat_root)/EFI/BOOT/surface-kvm-entry-terminal.efi
 	    boot
 }
 EOF
@@ -483,7 +573,9 @@ menuentry 'Install Proxmox VE (Surface EL2/KVM via EFI Shell)' --id surface-el2-
     echo    'Entering Surface EL2/KVM via EFI Shell ...'
     insmod  chain
     search  --no-floppy --file --set=iso_root /boot/linux26
-	    chainloader (\$iso_root)/EFI/BOOT/surface-kvm-shell-bridge.efi
+    search  --no-floppy --fs-uuid --set=fat_root \$surface_fat_uuid
+    set root=\$iso_root
+    chainloader (\$fat_root)/EFI/BOOT/surface-kvm-shell-bridge.efi
     boot
 }
 
@@ -508,10 +600,20 @@ EOF
 
 patch_iso_efi_grub_cfg() {
 	local efi_image=$1
-	local cfg
+	local cfg fat_uuid
 
 	cfg=$(mktemp "$WORK_DIR/iso-efi-grub.XXXXXX")
 	mcopy -i "$efi_image" ::/EFI/BOOT/grub.cfg "$cfg" >/dev/null
+	fat_uuid=$(blkid -s UUID -o value "$efi_image") || true
+	[[ "$fat_uuid" =~ ^[[:xdigit:]-]+$ ]] || {
+		rm -f -- "$cfg"
+		die "could not read the EFI FAT UUID from $efi_image"
+	}
+	# Preserve the firmware-readable FAT handle before the config searches for
+	# /boot/linux26 on the ISO9660 volume.  EFI LoadImage cannot open an EFI
+	# application from ISO9660 on the affected Surface firmware.
+	sed -i '1i set fat_root=$root' "$cfg"
+	sed -i "1i set surface_fat_uuid=$fat_uuid" "$cfg"
 	# The source Proxmox EFI image embeds the UUID of the ISO it was built
 	# from.  Rebuilding with xorriso gives the output ISO a new UUID, so the
 	# original search can fail and firmware may fall through to the installed
@@ -521,6 +623,14 @@ patch_iso_efi_grub_cfg() {
 	grep -Fq 'search --no-floppy --file --set=root /boot/linux26' "$cfg" || {
 		rm -f -- "$cfg"
 		die "could not make the embedded EFI GRUB config locate the ISO"
+	}
+	grep -Fq 'set fat_root=$root' "$cfg" || {
+		rm -f -- "$cfg"
+		die "could not preserve the FAT EFI handle for KVM chainloading"
+	}
+	grep -Fq "set surface_fat_uuid=$fat_uuid" "$cfg" || {
+		rm -f -- "$cfg"
+		die "could not preserve the FAT EFI UUID for KVM chainloading"
 	}
 	mcopy -i "$efi_image" -o "$cfg" ::/EFI/BOOT/grub.cfg >/dev/null
 	rm -f -- "$cfg"
@@ -535,7 +645,7 @@ import sys
 
 path = pathlib.Path(sys.argv[1])
 lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
-entry = re.compile(r"^\s*menuentry\b.*--id\s+['\"]?surface-el2-kvm-(?:graphical|terminal|shell(?:-graphical|-terminal|-linux)?)")
+entry = re.compile(r"^\s*menuentry\b.*--id\s+['\"]?surface-el2-kvm-(?:graphical|terminal|without-ufs-(?:graphical|terminal)|shell(?:-graphical|-terminal|-linux)?)")
 result = []
 removed = 0
 index = 0
@@ -563,6 +673,8 @@ build_standalone_kvm_grub() {
 	local mode=$1
 	local output=$2
 	local payload_mode=${3:-iso}
+	local dtb_name=${4:-$EL2_DTB_NAME}
+	local kernel_args=${5:-$EL2_KERNEL_ARGS}
 	local extra=
 	local config="$WORK_DIR/surface-kvm-grub-$mode.cfg"
 	local grub_dir=${GRUB_MODULE_DIR:-}
@@ -604,7 +716,7 @@ if ! [ -s "\$surface_initrd" ]; then
     echo 'surface-kvm: FAT initramfs missing or empty'
     halt
 fi
-linux "\$surface_kernel" ro ramdisk_size=16777216 rw quiet splash=silent $EL2_KERNEL_ARGS$extra
+linux "\$surface_kernel" ro ramdisk_size=16777216 rw quiet splash=silent $kernel_args$extra
 devicetree "\$surface_dtb"
 initrd "\$surface_initrd"
 boot
@@ -624,8 +736,8 @@ set timeout=0
 insmod iso9660
 search --no-floppy --file --set=root /boot/linux26
 echo 'Loading Surface EL2/KVM installer ...'
-linux /boot/linux26 ro ramdisk_size=16777216 rw quiet splash=silent $EL2_KERNEL_ARGS$extra
-devicetree /boot/$EL2_DTB_NAME
+linux /boot/linux26 ro ramdisk_size=16777216 rw quiet splash=silent $kernel_args$extra
+devicetree /boot/$dtb_name
 initrd /boot/initrd.img
 boot
 EOF
@@ -770,14 +882,20 @@ clear_iso_kvm_bridge() {
 	rm -f -- \
 		"$bridge_dir/surface-kvm-entry.efi" \
 		"$bridge_dir/surface-kvm-entry-terminal.efi" \
+		"$bridge_dir/surface-kvm-entry-without-ufs.efi" \
+		"$bridge_dir/surface-kvm-entry-without-ufs-terminal.efi" \
 		"$bridge_dir/surface-kvm-grubaa64.efi" \
 		"$bridge_dir/surface-kvm-grub-terminal.efi" \
+		"$bridge_dir/surface-kvm-grub-without-ufs.efi" \
+		"$bridge_dir/surface-kvm-grub-without-ufs-terminal.efi" \
 		"$bridge_dir/surface-kvm-shell.efi" \
 		"$bridge_dir/surface-kvm-shell-bridge.efi" \
 		"$bridge_dir/slbounceaa64.efi" \
 		"$bridge_dir/qebspilaa64.efi" \
 		"$bridge_dir/surface-laptop-13-el2.dtb" \
+		"$bridge_dir/surface-laptop-13-el2-without-ufs.dtb" \
 		"$STAGE_DIR/surface-laptop-13-el2.dtb" \
+		"$STAGE_DIR/surface-laptop-13-el2-without-ufs.dtb" \
 		"$STAGE_DIR/tcblaunch.exe" \
 		"$STAGE_DIR/startup.nsh"
 }
@@ -798,6 +916,10 @@ install_kvm_iso_bridge() {
 	# the read-only EFI system image's GRUB environment.
 	mcopy -i "$efi_image" ::/EFI/BOOT/surface-kvm-entry.efi \
 		"$bridge_dir/surface-kvm-entry.efi"
+	if [[ -n "$EL2_DTB_WITHOUT_UFS_FILE" ]]; then
+		mcopy -i "$efi_image" ::/EFI/BOOT/surface-kvm-entry-without-ufs.efi \
+			"$bridge_dir/surface-kvm-entry-without-ufs.efi"
+	fi
 	mcopy -i "$efi_image" ::/EFI/BOOT/slbounceaa64.efi \
 		"$bridge_dir/slbounceaa64.efi"
 	mcopy -i "$efi_image" ::/tcblaunch.exe "$STAGE_DIR/tcblaunch.exe"
@@ -809,6 +931,12 @@ install_kvm_iso_bridge() {
 	# reused.
 	cp --preserve=mode,timestamps "$EL2_DTB_FILE" \
 		"$bridge_dir/surface-laptop-13-el2.dtb"
+	if [[ -n "$EL2_DTB_WITHOUT_UFS_FILE" ]]; then
+		cp --preserve=mode,timestamps "$EL2_DTB_WITHOUT_UFS_FILE" \
+			"$STAGE_DIR/surface-laptop-13-el2-without-ufs.dtb"
+		cp --preserve=mode,timestamps "$EL2_DTB_WITHOUT_UFS_FILE" \
+			"$bridge_dir/surface-laptop-13-el2-without-ufs.dtb"
+	fi
 
 	# qebspil and its firmware are optional, but when the supplied EFI image
 	# contains them the ISO bridge must carry them on the same ISO filesystem.
@@ -849,34 +977,94 @@ install_kvm_iso_bridge() {
 	# The loader chooses the terminal image from its own chainloader filename.
 	cp --preserve=mode,timestamps "$bridge_dir/surface-kvm-entry.efi" \
 		"$bridge_dir/surface-kvm-entry-terminal.efi"
+	if [[ -n "$EL2_DTB_WITHOUT_UFS_FILE" ]]; then
+		cp --preserve=mode,timestamps "$bridge_dir/surface-kvm-entry-without-ufs.efi" \
+			"$bridge_dir/surface-kvm-entry-without-ufs-terminal.efi"
+	fi
 	build_standalone_kvm_grub graphical \
 		"$bridge_dir/surface-kvm-grubaa64.efi"
 	build_standalone_kvm_grub terminal \
 		"$bridge_dir/surface-kvm-grub-terminal.efi"
+	if [[ -n "$EL2_DTB_WITHOUT_UFS_FILE" ]]; then
+		build_standalone_kvm_grub graphical \
+			"$bridge_dir/surface-kvm-grub-without-ufs.efi" iso \
+			"$EL2_DTB_WITHOUT_UFS_NAME" \
+			"$EL2_KERNEL_ARGS module_blacklist=ufs_qcom,phy_qcom_qmp_ufs"
+		build_standalone_kvm_grub terminal \
+			"$bridge_dir/surface-kvm-grub-without-ufs-terminal.efi" iso \
+			"$EL2_DTB_WITHOUT_UFS_NAME" \
+			"$EL2_KERNEL_ARGS module_blacklist=ufs_qcom,phy_qcom_qmp_ufs"
+	fi
 
-	# Keep the KVM payload on the ISO9660 volume only.  The supplied FAT image
-	# is also the El Torito device presented by firmware, so copying a complete
-	# second payload there makes the loader's volume scan ambiguous when GRUB
-	# starts the ISO launcher without an EFI_SIMPLE_FILE_SYSTEM device handle.
-	# The normal shim/GRUB in the FAT image remains the default firmware path;
-	# the explicit ISO GRUB entries chainload the complete payload above.
-	local fat_path
+	# EFI LoadImage cannot open an EFI application from the ISO9660 volume on
+	# the affected Surface firmware.  Keep the Secure Launch bridge and its
+	# small GRUB/DTB payload on the firmware-readable El Torito FAT volume.  The
+	# standalone GRUB then searches the ISO for /boot/linux26 and initrd.img,
+	# while the launcher itself sees exactly one complete payload volume.
+	local fat_path fat_image="$STAGE_DIR/efi.img"
 	for fat_path in \
 		::/EFI/BOOT/surface-kvm-entry.efi \
 		::/EFI/BOOT/surface-kvm-entry-terminal.efi \
+		::/EFI/BOOT/surface-kvm-entry-without-ufs.efi \
+		::/EFI/BOOT/surface-kvm-entry-without-ufs-terminal.efi \
 		::/EFI/PROXMOX/surface-kvm-entry.efi \
+		::/EFI/PROXMOX/surface-kvm-entry-without-ufs.efi \
 		::/EFI/BOOT/surface-kvm-grubaa64.efi \
 		::/EFI/BOOT/surface-kvm-grub-terminal.efi \
+		::/EFI/BOOT/surface-kvm-grub-without-ufs.efi \
+		::/EFI/BOOT/surface-kvm-grub-without-ufs-terminal.efi \
 		::/EFI/BOOT/slbounceaa64.efi \
 		::/EFI/BOOT/qebspilaa64.efi \
 		::/EFI/BOOT/surface-kvm-shell.efi \
 		::/EFI/BOOT/surface-kvm-shell-bridge.efi \
 		::/EFI/BOOT/surface-laptop-13-el2.dtb \
+		::/EFI/BOOT/surface-laptop-13-el2-without-ufs.dtb \
 		::/surface-laptop-13-el2.dtb \
+		::/surface-laptop-13-el2-without-ufs.dtb \
 		::/tcblaunch.exe \
 		::/startup.nsh; do
-		mdel -i "$STAGE_DIR/efi.img" "$fat_path" >/dev/null 2>&1 || true
+		mdel -i "$fat_image" "$fat_path" >/dev/null 2>&1 || true
 	done
+	for payload in \
+		'surface-kvm-entry.efi::/EFI/BOOT/surface-kvm-entry.efi' \
+		'surface-kvm-entry-terminal.efi::/EFI/BOOT/surface-kvm-entry-terminal.efi' \
+		'surface-kvm-grubaa64.efi::/EFI/BOOT/surface-kvm-grubaa64.efi' \
+		'surface-kvm-grub-terminal.efi::/EFI/BOOT/surface-kvm-grub-terminal.efi' \
+		'slbounceaa64.efi::/EFI/BOOT/slbounceaa64.efi' \
+		'surface-laptop-13-el2.dtb::/surface-laptop-13-el2.dtb' \
+		'surface-laptop-13-el2.dtb::/EFI/BOOT/surface-laptop-13-el2.dtb' \
+		'tcblaunch.exe::/tcblaunch.exe'; do
+		local source=${payload%%::*} destination=${payload#*::}
+		case "$source" in
+			surface-kvm-entry*) source="$bridge_dir/$source" ;;
+			surface-kvm-grub*) source="$bridge_dir/$source" ;;
+			surface-laptop-13-el2*) source="$bridge_dir/$source" ;;
+			slbounceaa64.efi) source="$bridge_dir/$source" ;;
+			tcblaunch.exe) source="$STAGE_DIR/$source" ;;
+		esac
+		[[ -f "$source" ]] || die "FAT KVM payload source is missing: $source"
+		mcopy -i "$fat_image" -o "$source" "::$destination" >/dev/null
+	done
+	if [[ -n "$EL2_DTB_WITHOUT_UFS_FILE" ]]; then
+		for payload in \
+			'surface-kvm-entry-without-ufs.efi::/EFI/BOOT/surface-kvm-entry-without-ufs.efi' \
+			'surface-kvm-entry-without-ufs-terminal.efi::/EFI/BOOT/surface-kvm-entry-without-ufs-terminal.efi' \
+			'surface-kvm-grub-without-ufs.efi::/EFI/BOOT/surface-kvm-grub-without-ufs.efi' \
+			'surface-kvm-grub-without-ufs-terminal.efi::/EFI/BOOT/surface-kvm-grub-without-ufs-terminal.efi' \
+			'surface-laptop-13-el2-without-ufs.dtb::/surface-laptop-13-el2-without-ufs.dtb' \
+			'surface-laptop-13-el2-without-ufs.dtb::/EFI/BOOT/surface-laptop-13-el2-without-ufs.dtb'; do
+			local source=${payload%%::*} destination=${payload#*::}
+			case "$source" in
+				surface-kvm-entry*|surface-kvm-grub*|surface-laptop-13-el2*) source="$bridge_dir/$source" ;;
+			esac
+			[[ -f "$source" ]] || die "FAT without-UFS payload source is missing: $source"
+			mcopy -i "$fat_image" -o "$source" "::$destination" >/dev/null
+		done
+	fi
+	# Remove the duplicate ISO-side launcher payload after it has been copied
+	# to FAT.  The kernel, initramfs, and installer DTBs remain under /boot on
+	# ISO9660 for the standalone GRUB loaded from the FAT bridge.
+	clear_iso_kvm_bridge
 }
 
 augment_initrd_with_modules() {
@@ -958,6 +1146,7 @@ verify_iso() {
 	local output_iso=$1
 	local dtb_path=$2
 	local el2_dtb_path=${3:-}
+	local el2_dtb_without_ufs_path=${4:-}
 	local listing efi_image efi_listing efi_cfg boot_hash shim_hash required
 	local xorriso_input=$output_iso
 	[[ -s "$output_iso" ]] || die "output ISO was not created: $output_iso"
@@ -974,6 +1163,10 @@ verify_iso() {
 	grep -Fq "Path = boot/$dtb_path" "$listing" || die "Surface DTB is missing from output ISO"
 	if [[ -n "$el2_dtb_path" ]]; then
 		grep -Fq "Path = boot/$el2_dtb_path" "$listing" || die "EL2 DTB is missing from output ISO"
+		if [[ -n "$el2_dtb_without_ufs_path" ]]; then
+			grep -Fq "Path = boot/$el2_dtb_without_ufs_path" "$listing" ||
+				die "UFS-disabled EL2 DTB is missing from output ISO"
+		fi
 		efi_image=$(mktemp "$WORK_DIR/iso-efi.XXXXXX.img")
 		efi_listing=$(mktemp "$WORK_DIR/iso-efi-list.XXXXXX")
 		efi_cfg=$(mktemp "$WORK_DIR/iso-efi-grub-list.XXXXXX")
@@ -1003,12 +1196,35 @@ verify_iso() {
 				die "search-free ISO contains a duplicate KVM payload outside efi.img"
 			fi
 		else
-			grep -Fqi "Path = EFI/BOOT/surface-kvm-entry.efi" "$listing" || die "EL2/KVM bridge launcher is missing from output ISO"
-			grep -Fqi "Path = EFI/BOOT/surface-kvm-grubaa64.efi" "$listing" || die "EL2/KVM standalone GRUB is missing from output ISO"
+			for required in \
+				EFI/BOOT/surface-kvm-entry.efi \
+				EFI/BOOT/surface-kvm-entry-terminal.efi \
+				EFI/BOOT/surface-kvm-grubaa64.efi \
+				EFI/BOOT/surface-kvm-grub-terminal.efi \
+				EFI/BOOT/slbounceaa64.efi \
+				EFI/BOOT/surface-laptop-13-el2.dtb \
+				surface-laptop-13-el2.dtb \
+				tcblaunch.exe; do
+				grep -Fqi "Path = $required" "$efi_listing" || die "EFI FAT KVM payload is missing $required"
+			done
+			if [[ -n "$el2_dtb_without_ufs_path" ]]; then
+				grep -Fqi "Path = EFI/BOOT/surface-kvm-entry-without-ufs.efi" "$efi_listing" ||
+					die "without-UFS EL2/KVM bridge launcher is missing from output ISO"
+				grep -Fqi "Path = EFI/BOOT/surface-kvm-grub-without-ufs.efi" "$efi_listing" ||
+					die "without-UFS EL2/KVM standalone GRUB is missing from output ISO"
+				grep -Fqi "Path = EFI/BOOT/surface-kvm-entry-without-ufs-terminal.efi" "$efi_listing" ||
+					die "without-UFS terminal bridge launcher is missing from output ISO"
+				grep -Fqi "Path = EFI/BOOT/surface-kvm-grub-without-ufs-terminal.efi" "$efi_listing" ||
+					die "without-UFS terminal standalone GRUB is missing from output ISO"
+				grep -Fqi "Path = EFI/BOOT/surface-laptop-13-el2-without-ufs.dtb" "$efi_listing" ||
+					die "without-UFS DTB is missing from output ISO EFI FAT image"
+				grep -Fqi "Path = surface-laptop-13-el2-without-ufs.dtb" "$efi_listing" ||
+					die "without-UFS root DTB is missing from output ISO EFI FAT image"
+			fi
 			grep -Fq 'search --no-floppy --file --set=root /boot/linux26' "$efi_cfg" ||
 				die "output ISO EFI GRUB config still uses a stale filesystem UUID"
-			if grep -Eiq '^Path = (EFI/(BOOT|PROXMOX)/.*(surface-kvm|slbounce|surface-laptop-13-el2)|surface-laptop-13-el2\.dtb|tcblaunch\.exe|startup\.nsh)' "$efi_listing"; then
-				die "output ISO EFI image still contains a duplicate Surface KVM payload"
+			if grep -Eiq '^Path = (EFI/(BOOT|PROXMOX)/.*(surface-kvm|slbounce|surface-laptop-13-el2)|surface-laptop-13-el2\.dtb|tcblaunch\.exe|startup\.nsh)' "$listing"; then
+				die "output ISO9660 image still contains a duplicate Surface KVM payload"
 			fi
 		fi
 		boot_hash=$(7z e -so "$efi_image" EFI/BOOT/BOOTAA64.EFI 2>/dev/null | sha256sum | cut -d ' ' -f1)
@@ -1029,6 +1245,7 @@ main() {
 	need sed
 	need grep
 	need file
+	need blkid
 	need mcopy
 	if [[ "$FAT_BOOT" -eq 1 ]]; then
 		need mformat
@@ -1089,11 +1306,16 @@ main() {
 	if [[ -n "$EL2_DTB_FILE" ]]; then
 		EL2_DTB_FILE=$(absolute_path "$EL2_DTB_FILE")
 	fi
+	if [[ -n "$EL2_DTB_WITHOUT_UFS_FILE" ]]; then
+		EL2_DTB_WITHOUT_UFS_FILE=$(absolute_path "$EL2_DTB_WITHOUT_UFS_FILE")
+	fi
 
 	[[ -f "$INPUT_ISO" ]] || die "input ISO not found: $INPUT_ISO"
 	[[ "$INPUT_ISO" != "$OUTPUT_ISO" ]] || die "input and output ISO must be different files"
 	[[ "$DTB_NAME" != */* && "$DTB_NAME" != "" ]] || die "--dtb-name must be a file name without '/': $DTB_NAME"
 	[[ "$EL2_DTB_NAME" != */* && "$EL2_DTB_NAME" != "" ]] || die "--el2-dtb-name must be a file name without '/': $EL2_DTB_NAME"
+	[[ "$EL2_DTB_WITHOUT_UFS_NAME" != */* && "$EL2_DTB_WITHOUT_UFS_NAME" != "" ]] ||
+		die "--el2-dtb-without-ufs-name must be a file name without '/': $EL2_DTB_WITHOUT_UFS_NAME"
 	if [[ "$FAT_BOOT" -eq 1 ]]; then
 		[[ -n "$EL2_DTB_FILE" && -n "$EFI_IMAGE" ]] || die "--fat-boot requires --el2-dtb and --efi-image"
 		[[ "$FAT_BOOT_SIZE" =~ ^[0-9]+$ && "$FAT_BOOT_SIZE" -ge 167772160 ]] ||
@@ -1119,6 +1341,11 @@ main() {
 		verify_efi_slbounce "$EFI_IMAGE"
 		verify_efi_default_shim "$EFI_IMAGE"
 	fi
+	if [[ -n "$EL2_DTB_WITHOUT_UFS_FILE" ]]; then
+		[[ -n "$EL2_DTB_FILE" ]] || die "--el2-dtb-without-ufs requires --el2-dtb"
+		[[ -f "$EL2_DTB_WITHOUT_UFS_FILE" ]] ||
+			die "UFS-disabled EL2 DTB not found: $EL2_DTB_WITHOUT_UFS_FILE"
+	fi
 
 	mkdir -p "$OUTPUT_DIR" "$WORK_DIR"
 	build_missing_components
@@ -1140,6 +1367,10 @@ main() {
 	cp --preserve=mode,timestamps "$DTB_FILE" "$STAGE_DIR/boot/$DTB_NAME"
 	if [[ -n "$EL2_DTB_FILE" ]]; then
 		cp --preserve=mode,timestamps "$EL2_DTB_FILE" "$STAGE_DIR/boot/$EL2_DTB_NAME"
+	fi
+	if [[ -n "$EL2_DTB_WITHOUT_UFS_FILE" ]]; then
+		cp --preserve=mode,timestamps "$EL2_DTB_WITHOUT_UFS_FILE" \
+			"$STAGE_DIR/boot/$EL2_DTB_WITHOUT_UFS_NAME"
 	fi
 	if [[ -n "$EFI_IMAGE" ]]; then
 		cp --preserve=mode,timestamps "$EFI_IMAGE" "$STAGE_DIR/efi.img"
@@ -1172,7 +1403,8 @@ main() {
 
 	rm -f -- "$OUTPUT_ISO"
 	rebuild_iso "$INPUT_ISO" "$OUTPUT_ISO" "$STAGE_DIR"
-	verify_iso "$OUTPUT_ISO" "$DTB_NAME" "${EL2_DTB_FILE:+$EL2_DTB_NAME}"
+	verify_iso "$OUTPUT_ISO" "$DTB_NAME" "${EL2_DTB_FILE:+$EL2_DTB_NAME}" \
+		"${EL2_DTB_WITHOUT_UFS_FILE:+$EL2_DTB_WITHOUT_UFS_NAME}"
 	printf '\nPatched ISO: %s\n' "$OUTPUT_ISO"
 	file "$OUTPUT_ISO"
 }

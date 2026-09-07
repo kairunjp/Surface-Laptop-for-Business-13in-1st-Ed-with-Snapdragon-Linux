@@ -123,24 +123,29 @@ loader, and `--firmware-tree` copies an additional firmware tree into the EFI
 image. It is not started by default: use `--load-qebspil` only after validating
 the basic EL2 path on the target device. The normal EL1 DTB remains separate so non-KVM boots and hardware
 variants can continue to use their own menu entries. The ISO KVM entries
-chainload a Secure Launch bridge on the ISO filesystem, then boot the selected
-EL2 DTB and installer initramfs; they do not rely on a writable GRUB
-environment. The builder keeps that KVM payload only on the ISO9660 volume;
-the embedded FAT image retains the normal PVE shim/GRUB path. This is
-intentional because the EFI launcher rejects ambiguous volumes when both the
-ISO and the El Torito FAT image contain a complete KVM payload.
-The embedded FAT GRUB configuration is rewritten to find `/boot/linux26`
-instead of retaining the source ISO's filesystem UUID, so firmware cannot
-fall through to an installed PVE disk after the ISO is rebuilt.
+variants can continue to use their own menu entries. The ISO KVM entries
+chainload a Secure Launch bridge on the El Torito FAT volume, then boot the
+selected EL2 DTB and installer initramfs; they do not rely on a writable GRUB
+environment. The EFI launcher and its Secure Launch/standalone-GRUB payload
+are kept on the firmware-readable El Torito FAT volume. The standalone GRUB
+then loads `/boot/linux26`, `/boot/initrd.img`, and the selected installer DTB
+from the ISO filesystem. This avoids asking firmware to `LoadImage` an EFI
+application directly from ISO9660, which fails on the affected Surface with
+`image not loaded` even when the file is present.
+The embedded FAT GRUB configuration records its own volume before searching
+for `/boot/linux26`, so KVM chainloading always targets the USB FAT payload
+and cannot fall through to an installed PVE disk after the ISO is rebuilt.
 `build-proxmox-iso.sh` accepts `EL2_KERNEL_ARGS` when a different Qualcomm
 firmware needs a platform-specific EL2 command line.
 
 For firmware which does not reliably expose the ISO9660 filesystem to GRUB,
 pass `--fat-boot`. This creates a 256 MiB El Torito FAT image containing the
 kernel, installer initramfs, both DTBs, and the complete Secure Launch chain.
-The normal Proxmox shim is retained. The first GRUB embeds the FAT menu so it
-cannot redirect to the stock ISO menu, which has no Secure Launch entries. That menu
-loads every boot file relative to the USB device from which it was started; it
+In normal ISO mode, the Proxmox shim, first-stage GRUB, menu, and theme are
+retained. The Surface EL2/KVM entries are appended to that official menu and
+KVM is made the default. In FAT mode, the adjacent EFI configuration carries
+the same KVM and Ready entries.
+The KVM handoff loads boot files relative to the USB device from which it was started; it
 performs no internal-disk, partition, label, UUID, or marker search. Its KVM
 entry follows the installed Surface sequence (`surface-kvm-entry.efi`,
 slbounce, then the standalone KVM GRUB), and saves a Ready entry on the USB
@@ -170,6 +175,15 @@ custom `/etc/grub.d/01_surface-laptop-13`. It arms `surface-el1-ready` before
 the Secure Launch handoff, so an early reset falls back to Ready. Install
 `tools/surface-kvm-clear-fallback.sh` and its systemd unit as well; a successful
 EL2 boot clears the one-shot fallback after networking is up.
+The verified bundle installer also sets `GRUB_DEFAULT=surface-el2-kvm`, so the
+existing PVE GRUB menu enters the normal EL2/KVM item while retaining Ready as
+the one-shot fallback. The normal KVM payload keeps UFS enabled. The installer
+ISO exposes a separate `without UFS` entry under `Advanced Options`; that
+entry uses an EL2 DTB with the internal UFS host and PHY disabled and adds the
+matching UFS module blacklist arguments.
+The installed bundle carries the same alternate launcher and DTB in the
+Surface EL2/KVM advanced submenu; its ordinary `surface-el2-kvm` entry remains
+UFS-on.
 
 
 ## Using on your own install
