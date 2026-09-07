@@ -159,6 +159,10 @@ matching release directory with `--lvm-module-tree`; the builder replaces the
 five device-mapper modules and module indexes in the initramfs and verifies
 their SHA-256 values. A matching release name or `vermagic` alone is not enough
 to distinguish two kernel builds with different exported symbols.
+The archive writer also emits missing parent directories before their files.
+The ISO check extracts the LVM tree without `cpio -d`: a module listed in an
+archive but lacking its parent directory cannot be created by Linux's initramfs
+unpacker. This check covers `persistent-data/dm-persistent-data.ko` in particular.
 
 For an installed system, use `tools/installed-grub-surface-laptop-13` as the
 custom `/etc/grub.d/01_surface-laptop-13`. It arms `surface-el1-ready` before

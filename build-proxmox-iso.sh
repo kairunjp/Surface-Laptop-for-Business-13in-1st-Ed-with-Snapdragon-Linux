@@ -363,7 +363,7 @@ patch_proxmox_initrd_lvm() {
 }
 
 verify_proxmox_installer_initrd() {
-	local initrd=$1 listing init_text required release relative expected actual
+	local initrd=$1 listing init_text required release relative expected actual extract_dir
 	[[ -s "$initrd" ]] || die "installer initrd is missing or empty: $initrd"
 	listing=$(mktemp "$WORK_DIR/initrd-list.XXXXXX")
 	if ! zstd -q -dc "$initrd" | cpio -it --quiet >"$listing" 2>/dev/null; then
@@ -414,6 +414,24 @@ verify_proxmox_installer_initrd() {
 		rm -f -- "$listing"
 		die "initrd is missing the LVM userspace tool: $initrd"
 	}
+	# Listing/--to-stdout succeeds even if the kernel cannot unpack a file
+	# because its parent directory is absent. Do not use cpio -d here.
+	extract_dir=$(mktemp -d "$WORK_DIR/lvm-unpack.XXXXXX")
+	if ! zstd -q -dc "$initrd" | (cd "$extract_dir" && cpio -i --quiet \
+		'lib' 'lib/modules' 'lib/modules/*surface-laptop-13' \
+		'lib/modules/*surface-laptop-13/kernel' \
+		'lib/modules/*surface-laptop-13/kernel/drivers' \
+		'lib/modules/*surface-laptop-13/kernel/drivers/md*'); then
+		rm -rf -- "$extract_dir"
+		die "Surface LVM files cannot be unpacked without creating missing parents"
+	fi
+	for required in dm-mod dm-bio-prison dm-bufio dm-persistent-data dm-thin-pool; do
+		if ! find "$extract_dir" -type f -name "$required.ko" -size +0c | grep -q .; then
+			rm -rf -- "$extract_dir"
+			die "Surface LVM module was not unpacked: $required"
+		fi
+	done
+	rm -rf -- "$extract_dir"
 	if [[ -n "$LVM_MODULE_TREE" ]]; then
 		release=$(basename "$LVM_MODULE_TREE")
 		for relative in \

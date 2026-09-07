@@ -22,14 +22,15 @@ load_surface_dm_module() {
 
     echo "surface-initramfs: loading $module_name"
     if ! /sbin/modprobe "$module_name"; then
+        dmesg | tail -60
         debugsh_err_reboot "failed to load Surface LVM module: $module_name"
     fi
 }
 
 # dm_thin_pool pulls in bio-prison, bufio and persistent-data according to the
 # kernel's modules.dep.  Let modprobe resolve their installed paths instead of
-# duplicating those paths here; concatenated installer initramfs archives can
-# otherwise make an early fixed-path test disagree with modprobe's view.
+# duplicating those paths here. The archive builder must include their parent
+# directories so the kernel can actually unpack the module files.
 load_surface_dm_module dm_mod
 load_surface_dm_module dm_thin_pool
 /sbin/mdev -s

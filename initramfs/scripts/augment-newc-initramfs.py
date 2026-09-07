@@ -78,6 +78,45 @@ def read_manifest(path: str) -> dict[str, tuple[bytes, int]]:
     return replacements
 
 
+def ensure_parent_entries(entries: list[tuple[str, bytes]]) -> list[tuple[str, bytes]]:
+    """Emit parents before children, including files already in a broken input.
+
+    The kernel unpacker does not implement mkdir -p. Archive listing and
+    cpio --to-stdout cannot detect files which it will silently fail to create.
+    Preserve explicit directory metadata and existing symlinks (e.g. usrmerge).
+    """
+    explicit = {os.path.normpath(name): (name, raw) for name, raw in entries}
+    emitted: set[str] = {"."}
+    result: list[tuple[str, bytes]] = []
+    ino = max((int(raw[6:14], 16) for _, raw in entries), default=0) + 1
+
+    def parent(name: str) -> None:
+        nonlocal ino
+        if name in emitted:
+            return
+        parent(os.path.dirname(name) or ".")
+        if name in explicit:
+            entry = explicit[name]
+            mode = int(entry[1][14:22], 16)
+            if not (stat.S_ISDIR(mode) or stat.S_ISLNK(mode)):
+                raise ValueError(f"archive parent is not a directory or symlink: {name}")
+        else:
+            entry = (name, newc_entry(name.encode(), b"", stat.S_IFDIR | 0o755, ino))
+            ino += 1
+        result.append(entry)
+        emitted.add(name)
+
+    for name, raw in entries:
+        normalized = os.path.normpath(name)
+        if normalized.startswith("/") or ".." in normalized.split("/"):
+            raise ValueError(f"unsafe archive path: {name}")
+        parent(os.path.dirname(normalized) or ".")
+        if normalized not in emitted or normalized == ".":
+            result.append((name, raw))
+            emitted.add(normalized)
+    return result
+
+
 def main() -> None:
     raw = len(sys.argv) == 5 and sys.argv[1] == "--raw"
     args = sys.argv[2:] if raw else sys.argv[1:]
@@ -93,7 +132,7 @@ def main() -> None:
         (name, newc_entry(name.encode("utf-8", "surrogateescape"), payload, mode, ino + i))
         for i, (name, (payload, mode)) in enumerate(replacements.items())
     ]
-    archive = b"".join(raw_entry for _, raw_entry in kept + additions) + trailer
+    archive = b"".join(raw_entry for _, raw_entry in ensure_parent_entries(kept + additions)) + trailer
     packed = archive if raw else gzip.compress(archive, compresslevel=9, mtime=0)
     os.makedirs(os.path.dirname(os.path.abspath(target)), exist_ok=True)
     with open(target, "xb") as output:
