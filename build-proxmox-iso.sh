@@ -362,6 +362,11 @@ patch_proxmox_initrd_lvm() {
 		die "cannot extract Proxmox::Install from the selected ISO"
 	python3 "$ROOT_DIR/initramfs/scripts/patch-proxmox-installer-efi.py" \
 		"$installer_module" "$init_file"
+	# Ventoy's cpio hook targets the older Proxmox /sys/block/hd* scanner.
+	# Current installer init uses /sys/class/block, so invoke Ventoy's official
+	# Proxmox disk hook explicitly before the ISO scan and accept its dm mapping.
+	python3 "$ROOT_DIR/initramfs/scripts/patch-proxmox-installer-ventoy.py" \
+		"$init_file"
 	sh -n "$init_file"
 	printf 'init %s 0755\n' "$init_file" >"$manifest"
 	printf 'surface-installer/Install.pm %s 0644\n' "$installer_module" >>"$manifest"
@@ -433,6 +438,22 @@ verify_proxmox_installer_initrd() {
 	grep -Fq 'dm_mod dm_bio_prison dm_bufio dm_persistent_data dm_thin_pool' <<<"$init_text" || {
 		rm -f -- "$listing"
 		die "initrd does not verify the complete Surface LVM module stack: $initrd"
+	}
+	grep -Fq 'surface_ventoy_prepare_dm' <<<"$init_text" || {
+		rm -f -- "$listing"
+		die "initrd does not invoke the Ventoy Proxmox ISO hook: $initrd"
+	}
+	grep -Fq '/sys/class/block/dm-*' <<<"$init_text" || {
+		rm -f -- "$listing"
+		die "initrd does not scan Ventoy device-mapper ISO devices: $initrd"
+	}
+	grep -Fq 'mount -t iso9660 -o loop,ro' <<<"$init_text" || {
+		rm -f -- "$listing"
+		die "initrd does not use a loop mount for Ventoy sector-size compatibility: $initrd"
+	}
+	grep -Fq 'losetup -r "$surface_iso_loop" "$1"' <<<"$init_text" || {
+		rm -f -- "$listing"
+		die "initrd does not explicitly loop-map block devices for Ventoy: $initrd"
 	}
 	for required in \
 		dm-mod.ko \

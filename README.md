@@ -168,6 +168,12 @@ The archive writer also emits missing parent directories before their files.
 The ISO check extracts the LVM tree without `cpio -d`: a module listed in an
 archive but lacking its parent directory cannot be created by Linux's initramfs
 unpacker. This check covers `persistent-data/dm-persistent-data.ko` in particular.
+Ventoy's normal ISO mode injects its own cpio hook and exposes the selected ISO
+through `/dev/mapper/ventoy`. Current Proxmox installer init scripts use a
+different block-device scan than the one Ventoy's legacy hook edits, so the ISO
+builder invokes Ventoy's Proxmox hook explicitly, scans `dm-*`/`loop*` devices,
+and tries an ISO9660 loop mount first. The loop mount also avoids passing the
+Ventoy USB's 4096-byte hardware sector size directly to `isofs`.
 
 The Surface Laptop for Business 13-inch (2095) firmware exposes EFI boot
 services but the current Qualcomm kernel does not expose EFI variables through
