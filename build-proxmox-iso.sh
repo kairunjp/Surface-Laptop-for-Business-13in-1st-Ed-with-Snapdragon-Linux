@@ -372,6 +372,8 @@ patch_proxmox_initrd_lvm() {
 	printf 'surface-installer/Install.pm %s 0644\n' "$installer_module" >>"$manifest"
 	printf 'surface-installer/SurfaceEFI.pm %s 0644\n' \
 		"$ROOT_DIR/initramfs/installer/SurfaceEFI.pm" >>"$manifest"
+	printf 'surface-installer/powerctl %s 0755\n' \
+		"$ROOT_DIR/initramfs/scripts/surface-installer-powerctl.sh" >>"$manifest"
 	if [[ -n "$LVM_MODULE_TREE" ]]; then
 		release=$(basename "$LVM_MODULE_TREE")
 		for relative in \
@@ -379,9 +381,16 @@ patch_proxmox_initrd_lvm() {
 			kernel/drivers/md/dm-bio-prison.ko \
 			kernel/drivers/md/dm-bufio.ko \
 			kernel/drivers/md/persistent-data/dm-persistent-data.ko \
-			kernel/drivers/md/dm-thin-pool.ko; do
+			kernel/drivers/md/dm-thin-pool.ko \
+			kernel/drivers/net/mii.ko \
+			kernel/drivers/net/usb/r8152.ko \
+			kernel/drivers/net/usb/usbnet.ko \
+			kernel/drivers/net/usb/cdc_ether.ko \
+			kernel/drivers/net/usb/cdc_ncm.ko \
+			kernel/drivers/net/usb/asix.ko \
+			kernel/drivers/net/usb/ax88179_178a.ko; do
 			source="$LVM_MODULE_TREE/$relative"
-			[[ -f "$source" ]] || die "matching Surface LVM module is missing: $source"
+			[[ -f "$source" ]] || die "matching Surface early-boot module is missing: $source"
 			printf 'lib/modules/%s/%s %s 0644\n' "$release" "$relative" "$source" >>"$manifest"
 		done
 		while IFS= read -r -d '' metadata; do
@@ -410,7 +419,7 @@ verify_proxmox_installer_initrd() {
 		die "initrd is not a Proxmox installer initrd (.cd-info is missing): $initrd"
 	}
 	init_text=$(zstd -q -dc "$initrd" | cpio -i --to-stdout init 2>/dev/null || true)
-	for required in surface-installer/Install.pm surface-installer/SurfaceEFI.pm; do
+	for required in surface-installer/Install.pm surface-installer/SurfaceEFI.pm surface-installer/powerctl; do
 		grep -Fxq "$required" "$listing" || die "installer EFI fallback payload is missing: $required"
 	done
 	grep -Fq 'cp /surface-installer/Install.pm "$surface_perl_dir/Install.pm"' <<<"$init_text" ||
@@ -434,6 +443,14 @@ verify_proxmox_installer_initrd() {
 	grep -Fq 'load_surface_dm_module dm_thin_pool' <<<"$init_text" || {
 		rm -f -- "$listing"
 		die "initrd does not ask modprobe to resolve the thin-pool dependency stack: $initrd"
+	}
+	grep -Fq 'SURFACE_USB_NET_DRIVERS="mii r8152 usbnet' <<<"$init_text" || {
+		rm -f -- "$listing"
+		die "initrd does not preload Surface USB network drivers: $initrd"
+	}
+	grep -Fq 'cp /surface-installer/powerctl' <<<"$init_text" || {
+		rm -f -- "$listing"
+		die "initrd does not install Surface power controls: $initrd"
 	}
 	grep -Fq 'dm_mod dm_bio_prison dm_bufio dm_persistent_data dm_thin_pool' <<<"$init_text" || {
 		rm -f -- "$listing"
@@ -466,6 +483,12 @@ verify_proxmox_installer_initrd() {
 			die "initrd is missing Surface LVM module $required: $initrd"
 		}
 	done
+	for required in mii r8152 usbnet cdc_ether cdc_ncm asix ax88179_178a; do
+		grep -Eq "^lib/modules/[^/]*surface-laptop-13/kernel/drivers/net/(usb/)?$required\\.ko$" "$listing" || {
+			rm -f -- "$listing"
+			die "initrd is missing Surface USB network module $required: $initrd"
+		}
+	done
 	grep -Fxq 'sbin/lvm' "$listing" || {
 		rm -f -- "$listing"
 		die "initrd is missing the LVM userspace tool: $initrd"
@@ -477,7 +500,11 @@ verify_proxmox_installer_initrd() {
 		'lib' 'lib/modules' 'lib/modules/*surface-laptop-13' \
 		'lib/modules/*surface-laptop-13/kernel' \
 		'lib/modules/*surface-laptop-13/kernel/drivers' \
-		'lib/modules/*surface-laptop-13/kernel/drivers/md*'); then
+		'lib/modules/*surface-laptop-13/kernel/drivers/md*' \
+		'lib/modules/*surface-laptop-13/kernel/drivers/net' \
+		'lib/modules/*surface-laptop-13/kernel/drivers/net/*' \
+		'lib/modules/*surface-laptop-13/kernel/drivers/net/usb' \
+		'lib/modules/*surface-laptop-13/kernel/drivers/net/usb/*'); then
 		rm -rf -- "$extract_dir"
 		die "Surface LVM files cannot be unpacked without creating missing parents"
 	fi
@@ -485,6 +512,12 @@ verify_proxmox_installer_initrd() {
 		if ! find "$extract_dir" -type f -name "$required.ko" -size +0c | grep -q .; then
 			rm -rf -- "$extract_dir"
 			die "Surface LVM module was not unpacked: $required"
+		fi
+	done
+	for required in mii r8152 usbnet cdc_ether cdc_ncm asix ax88179_178a; do
+		if ! find "$extract_dir" -type f -name "$required.ko" -size +0c | grep -q .; then
+			rm -rf -- "$extract_dir"
+			die "Surface USB network module was not unpacked: $required"
 		fi
 	done
 	rm -rf -- "$extract_dir"
@@ -495,13 +528,20 @@ verify_proxmox_installer_initrd() {
 			kernel/drivers/md/dm-bio-prison.ko \
 			kernel/drivers/md/dm-bufio.ko \
 			kernel/drivers/md/persistent-data/dm-persistent-data.ko \
-			kernel/drivers/md/dm-thin-pool.ko; do
+			kernel/drivers/md/dm-thin-pool.ko \
+			kernel/drivers/net/mii.ko \
+			kernel/drivers/net/usb/r8152.ko \
+			kernel/drivers/net/usb/usbnet.ko \
+			kernel/drivers/net/usb/cdc_ether.ko \
+			kernel/drivers/net/usb/cdc_ncm.ko \
+			kernel/drivers/net/usb/asix.ko \
+			kernel/drivers/net/usb/ax88179_178a.ko; do
 			expected=$(sha256sum "$LVM_MODULE_TREE/$relative" | cut -d ' ' -f1)
 			actual=$(zstd -q -dc "$initrd" | cpio -i --to-stdout \
 				"lib/modules/$release/$relative" 2>/dev/null | sha256sum | cut -d ' ' -f1)
 			[[ "$actual" == "$expected" ]] || {
 				rm -f -- "$listing"
-				die "initrd LVM module does not match selected kernel module tree: $relative"
+				die "initrd early-boot module does not match selected kernel module tree: $relative"
 			}
 		done
 	fi

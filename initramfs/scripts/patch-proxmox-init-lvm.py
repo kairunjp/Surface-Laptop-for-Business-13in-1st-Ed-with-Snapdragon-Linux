@@ -42,6 +42,16 @@ for module_name in \
     fi
 done
 
+# USB network devices can appear after the installer has completed its single
+# modalias scan.  Load common USB Ethernet drivers explicitly so adapters that
+# are already visible in lsusb also acquire a netdev before switch_root.
+SURFACE_USB_NET_DRIVERS="mii r8152 usbnet cdc_ether cdc_ncm ax88179_178a asix"
+for module_name in $SURFACE_USB_NET_DRIVERS; do
+    echo "surface-initramfs: loading USB network driver $module_name"
+    /sbin/modprobe -q "$module_name" || true
+done
+/sbin/mdev -s
+
 '''
 
 START_MARKER = "# The installer switches from this initramfs to the stock Proxmox SquashFS."
@@ -77,6 +87,8 @@ def main() -> None:
         raise SystemExit("fixed Surface LVM module path remains in loader")
     if text.count("load_surface_dm_module dm_thin_pool") != 1:
         raise SystemExit("Surface LVM loader was not installed exactly once")
+    if text.count('SURFACE_USB_NET_DRIVERS="') != 1 or "r8152" not in text:
+        raise SystemExit("Surface USB network preload was not installed exactly once")
     path.write_text(text, encoding="utf-8")
 
 

@@ -29,6 +29,14 @@ OVERLAY = OVERLAY_MARKER + '''    echo "installing Surface EFI variable fallback
        ! cp /surface-installer/SurfaceEFI.pm "$surface_perl_dir/Install/SurfaceEFI.pm"; then
         debugsh_err_reboot "unable to install Surface EFI variable fallback"
     fi
+    echo "installing Surface installer power controls"
+    for surface_power_command in poweroff reboot halt; do
+        rm -f "/mnt/.installer-mp/sbin/$surface_power_command"
+        if ! cp /surface-installer/powerctl "/mnt/.installer-mp/sbin/$surface_power_command"; then
+            debugsh_err_reboot "unable to install Surface $surface_power_command command"
+        fi
+        chmod 0755 "/mnt/.installer-mp/sbin/$surface_power_command"
+    done
 ''' + OVERLAY_END
 
 
