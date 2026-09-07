@@ -125,8 +125,12 @@ the basic EL2 path on the target device. The normal EL1 DTB remains separate so 
 variants can continue to use their own menu entries. The ISO KVM entries
 chainload a Secure Launch bridge on the ISO filesystem, then boot the selected
 EL2 DTB and installer initramfs; they do not rely on a writable GRUB
-environment. `build-proxmox-iso.sh` accepts `EL2_KERNEL_ARGS` when a different
-Qualcomm firmware needs a platform-specific EL2 command line.
+environment. The builder keeps that KVM payload only on the ISO9660 volume;
+the embedded FAT image retains the normal PVE shim/GRUB path. This is
+intentional because the EFI launcher rejects ambiguous volumes when both the
+ISO and the El Torito FAT image contain a complete KVM payload.
+`build-proxmox-iso.sh` accepts `EL2_KERNEL_ARGS` when a different Qualcomm
+firmware needs a platform-specific EL2 command line.
 
 For an installed system, use `tools/installed-grub-surface-laptop-13` as the
 custom `/etc/grub.d/01_surface-laptop-13`. It arms `surface-el1-ready` before

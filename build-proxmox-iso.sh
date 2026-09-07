@@ -429,6 +429,22 @@ install_kvm_iso_bridge() {
 
 	mkdir -p "$bridge_dir"
 	log "Installing ISO EL2/KVM Secure Launch bridge"
+	# A rebuild may use an ISO which already contains a partial KVM payload.
+	# Remove those files before copying the selected payload so stale Shell or
+	# DTB files cannot turn the new ISO into a second, different boot path.
+	rm -f -- \
+		"$bridge_dir/surface-kvm-entry.efi" \
+		"$bridge_dir/surface-kvm-entry-terminal.efi" \
+		"$bridge_dir/surface-kvm-grubaa64.efi" \
+		"$bridge_dir/surface-kvm-grub-terminal.efi" \
+		"$bridge_dir/surface-kvm-shell.efi" \
+		"$bridge_dir/surface-kvm-shell-bridge.efi" \
+		"$bridge_dir/slbounceaa64.efi" \
+		"$bridge_dir/qebspilaa64.efi" \
+		"$bridge_dir/surface-laptop-13-el2.dtb" \
+		"$STAGE_DIR/surface-laptop-13-el2.dtb" \
+		"$STAGE_DIR/tcblaunch.exe" \
+		"$STAGE_DIR/startup.nsh"
 	# The chainloaded launcher sees the ISO filesystem as its device volume.
 	# Keep every file it needs on that same filesystem rather than relying on
 	# the read-only EFI system image's GRUB environment.
@@ -490,19 +506,29 @@ install_kvm_iso_bridge() {
 	build_standalone_kvm_grub terminal \
 		"$bridge_dir/surface-kvm-grub-terminal.efi"
 
-	# Also keep the bridge in the FAT EFI image.  Depending on the GRUB and
-	# firmware combination, an EFI application chainloaded from an ISO9660
-	# file can receive either the ISO device handle or the El Torito FAT
-	# device handle as its LoadedImage device.
-	mcopy -i "$STAGE_DIR/efi.img" -o \
-		"$bridge_dir/surface-kvm-entry-terminal.efi" \
-		::/EFI/BOOT/surface-kvm-entry-terminal.efi
-	mcopy -i "$STAGE_DIR/efi.img" -o \
-		"$bridge_dir/surface-kvm-grubaa64.efi" \
-		::/EFI/BOOT/surface-kvm-grubaa64.efi
-	mcopy -i "$STAGE_DIR/efi.img" -o \
-		"$bridge_dir/surface-kvm-grub-terminal.efi" \
-		::/EFI/BOOT/surface-kvm-grub-terminal.efi
+	# Keep the KVM payload on the ISO9660 volume only.  The supplied FAT image
+	# is also the El Torito device presented by firmware, so copying a complete
+	# second payload there makes the loader's volume scan ambiguous when GRUB
+	# starts the ISO launcher without an EFI_SIMPLE_FILE_SYSTEM device handle.
+	# The normal shim/GRUB in the FAT image remains the default firmware path;
+	# the explicit ISO GRUB entries chainload the complete payload above.
+	local fat_path
+	for fat_path in \
+		::/EFI/BOOT/surface-kvm-entry.efi \
+		::/EFI/BOOT/surface-kvm-entry-terminal.efi \
+		::/EFI/PROXMOX/surface-kvm-entry.efi \
+		::/EFI/BOOT/surface-kvm-grubaa64.efi \
+		::/EFI/BOOT/surface-kvm-grub-terminal.efi \
+		::/EFI/BOOT/slbounceaa64.efi \
+		::/EFI/BOOT/qebspilaa64.efi \
+		::/EFI/BOOT/surface-kvm-shell.efi \
+		::/EFI/BOOT/surface-kvm-shell-bridge.efi \
+		::/EFI/BOOT/surface-laptop-13-el2.dtb \
+		::/surface-laptop-13-el2.dtb \
+		::/tcblaunch.exe \
+		::/startup.nsh; do
+		mdel -i "$STAGE_DIR/efi.img" "$fat_path" >/dev/null 2>&1 || true
+	done
 }
 
 augment_initrd_with_modules() {
@@ -584,7 +610,7 @@ verify_iso() {
 	local output_iso=$1
 	local dtb_path=$2
 	local el2_dtb_path=${3:-}
-	local listing
+	local listing efi_image efi_listing boot_hash shim_hash
 	local xorriso_input=$output_iso
 	[[ -s "$output_iso" ]] || die "output ISO was not created: $output_iso"
 	# xorriso treats paths below /dev as possible device nodes.  The build
@@ -602,6 +628,21 @@ verify_iso() {
 		grep -Fq "Path = boot/$el2_dtb_path" "$listing" || die "EL2 DTB is missing from output ISO"
 		grep -Fqi "Path = EFI/BOOT/surface-kvm-entry.efi" "$listing" || die "EL2/KVM bridge launcher is missing from output ISO"
 		grep -Fqi "Path = EFI/BOOT/surface-kvm-grubaa64.efi" "$listing" || die "EL2/KVM standalone GRUB is missing from output ISO"
+		# The ISO launcher must have exactly one complete payload volume.  The
+		# embedded FAT image is deliberately kept as the normal PVE boot path;
+		# retaining any KVM marker there would reintroduce the ambiguity this
+		# builder is meant to prevent.
+		efi_image=$(mktemp "$WORK_DIR/iso-efi.XXXXXX.img")
+		efi_listing=$(mktemp "$WORK_DIR/iso-efi-list.XXXXXX")
+		7z e -so "$output_iso" efi.img >"$efi_image" || die "cannot extract output ISO EFI image"
+		7z l -slt "$efi_image" >"$efi_listing"
+		if grep -Eiq '^Path = .*(surface-kvm|slbounce|tcblaunch|surface-laptop-13-el2|startup\.nsh)' "$efi_listing"; then
+			die "output ISO EFI image still contains a duplicate Surface KVM payload"
+		fi
+		boot_hash=$(7z e -so "$efi_image" EFI/BOOT/BOOTAA64.EFI 2>/dev/null | sha256sum | cut -d ' ' -f1)
+		shim_hash=$(7z e -so "$efi_image" EFI/BOOT/shimaa64.efi 2>/dev/null | sha256sum | cut -d ' ' -f1)
+		[[ -n "$boot_hash" && "$boot_hash" == "$shim_hash" ]] || die "output ISO default EFI is not the normal Proxmox shim"
+		rm -f -- "$efi_image" "$efi_listing"
 	fi
 	xorriso -indev "$xorriso_input" -report_el_torito as_mkisofs >/dev/null
 	rm -f -- "$listing"
@@ -618,6 +659,7 @@ main() {
 	need file
 	if [[ -n "$EL2_DTB_FILE" ]]; then
 		need mcopy
+		need mdel
 		need grub-mkstandalone
 		need sha256sum
 	fi
