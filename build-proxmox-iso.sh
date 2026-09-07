@@ -271,6 +271,30 @@ verify_efi_slbounce() {
 	die "EFI image does not contain the X1P42100-safe slbounce build; rebuild it with --slbounce-source and tools/slbounce-x1p42100-safe-ebs.patch"
 }
 
+verify_efi_default_shim() {
+	local efi_image=$1 boot_hash shim_hash shell_hash
+	boot_hash=$(7z e -so "$efi_image" 'EFI/BOOT/BOOTAA64.EFI' 2>/dev/null |
+		sha256sum | cut -d ' ' -f1)
+	shim_hash=$(7z e -so "$efi_image" 'EFI/BOOT/shimaa64.efi' 2>/dev/null |
+		sha256sum | cut -d ' ' -f1)
+	shell_hash=$(7z e -so "$efi_image" 'EFI/BOOT/surface-kvm-shell-bridge.efi' 2>/dev/null |
+		sha256sum | cut -d ' ' -f1)
+	[[ -n "$boot_hash" && -n "$shim_hash" && "$boot_hash" != \
+		"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" &&
+		"$shim_hash" != \
+		"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" ]] ||
+		die "EFI image is missing BOOTAA64.EFI or shimaa64.efi"
+	if [[ "$boot_hash" != "$shim_hash" ]]; then
+		die "EFI default BOOTAA64.EFI is not the Proxmox shimaa64.efi; rebuild the EFI image without --shell before patching an ISO"
+	fi
+	if [[ -n "$shell_hash" && "$shell_hash" != \
+		"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" &&
+		"$shim_hash" == "$shell_hash" ]]; then
+		die "EFI shimaa64.efi is the Surface EFI Shell bridge, not the Proxmox shim; rebuild the EFI image from a normal Proxmox EFI image"
+	fi
+	printf 'EFI default: BOOTAA64.EFI matches shimaa64.efi (%s)\n' "$boot_hash"
+}
+
 append_el2_grub_entries() {
 	local grub_cfg=$1
 
@@ -656,6 +680,7 @@ main() {
 		[[ -n "$EFI_IMAGE" ]] || die "--efi-image is required with --el2-dtb (it supplies the Secure Launch bridge)"
 		verify_efi_tcb "$EFI_IMAGE"
 		verify_efi_slbounce "$EFI_IMAGE"
+		verify_efi_default_shim "$EFI_IMAGE"
 	fi
 
 	mkdir -p "$OUTPUT_DIR" "$WORK_DIR"
