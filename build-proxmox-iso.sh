@@ -11,6 +11,7 @@ KERNEL_IMAGE=${KERNEL_IMAGE:-$WORK_DIR/kernel/Image}
 DTB_FILE=${DTB_FILE:-$WORK_DIR/dtb/surface-laptop-13-current.dtb}
 DTB_NAME=${DTB_NAME:-surface-laptop-13-current.dtb}
 INITRD_FILE=${INITRD_FILE:-}
+LVM_MODULE_TREE=${LVM_MODULE_TREE:-}
 WCN7850_FIRMWARE_SOURCE=${WCN7850_FIRMWARE_SOURCE:-}
 EFI_IMAGE=${EFI_IMAGE:-}
 EL2_DTB_FILE=${EL2_DTB_FILE:-}
@@ -81,6 +82,8 @@ Options:
   --el2-dtb-name NAME Name of the EL2 DTB inside /boot (default: surface-laptop-13-el2.dtb).
   --efi-image FILE    Replace the ISO EFI image (required for --el2-dtb).
   --initrd FILE       Replace the ISO initrd with this archive.
+  --lvm-module-tree DIR
+                      Replace the LVM modules with files built with --kernel-image.
   --wcn7850-firmware DIR
                       Add ath12k/WCN7850 Wi-Fi firmware to the ISO initrd.
   --no-initrd-modules Keep the selected initrd without adding built modules.
@@ -155,6 +158,11 @@ parse_args() {
 				shift
 				(($#)) || die "--initrd needs a file"
 				INITRD_FILE=$1
+				;;
+			--lvm-module-tree)
+				shift
+				(($#)) || die "--lvm-module-tree needs a directory"
+				LVM_MODULE_TREE=$1
 				;;
 			--wcn7850-firmware)
 				shift
@@ -307,7 +315,7 @@ verify_efi_default_shim() {
 }
 
 patch_proxmox_initrd_lvm() {
-	local initrd=$1 raw_initrd init_file manifest patched compressed
+	local initrd=$1 raw_initrd init_file manifest patched compressed release relative source metadata
 	raw_initrd=$(mktemp "$WORK_DIR/proxmox-initrd-lvm-raw.XXXXXX.img")
 	init_file=$(mktemp "$WORK_DIR/proxmox-init-lvm.XXXXXX")
 	manifest=$(mktemp "$WORK_DIR/proxmox-initrd-lvm.XXXXXX.manifest")
@@ -329,6 +337,23 @@ patch_proxmox_initrd_lvm() {
 	python3 "$ROOT_DIR/initramfs/scripts/patch-proxmox-init-lvm.py" "$init_file"
 	sh -n "$init_file"
 	printf 'init %s 0755\n' "$init_file" >"$manifest"
+	if [[ -n "$LVM_MODULE_TREE" ]]; then
+		release=$(basename "$LVM_MODULE_TREE")
+		for relative in \
+			kernel/drivers/md/dm-mod.ko \
+			kernel/drivers/md/dm-bio-prison.ko \
+			kernel/drivers/md/dm-bufio.ko \
+			kernel/drivers/md/persistent-data/dm-persistent-data.ko \
+			kernel/drivers/md/dm-thin-pool.ko; do
+			source="$LVM_MODULE_TREE/$relative"
+			[[ -f "$source" ]] || die "matching Surface LVM module is missing: $source"
+			printf 'lib/modules/%s/%s %s 0644\n' "$release" "$relative" "$source" >>"$manifest"
+		done
+		while IFS= read -r -d '' metadata; do
+			printf 'lib/modules/%s/%s %s 0644\n' \
+				"$release" "$(basename "$metadata")" "$metadata" >>"$manifest"
+		done < <(find "$LVM_MODULE_TREE" -maxdepth 1 -type f -name 'modules.*' -print0 | sort -z)
+	fi
 	python3 "$ROOT_DIR/initramfs/scripts/augment-newc-initramfs.py" --raw \
 		"$raw_initrd" "$patched" "$manifest"
 	zstd -q -T0 -19 -f "$patched" -o "$compressed"
@@ -338,7 +363,7 @@ patch_proxmox_initrd_lvm() {
 }
 
 verify_proxmox_installer_initrd() {
-	local initrd=$1 listing init_text required
+	local initrd=$1 listing init_text required release relative expected actual
 	[[ -s "$initrd" ]] || die "installer initrd is missing or empty: $initrd"
 	listing=$(mktemp "$WORK_DIR/initrd-list.XXXXXX")
 	if ! zstd -q -dc "$initrd" | cpio -it --quiet >"$listing" 2>/dev/null; then
@@ -389,6 +414,23 @@ verify_proxmox_installer_initrd() {
 		rm -f -- "$listing"
 		die "initrd is missing the LVM userspace tool: $initrd"
 	}
+	if [[ -n "$LVM_MODULE_TREE" ]]; then
+		release=$(basename "$LVM_MODULE_TREE")
+		for relative in \
+			kernel/drivers/md/dm-mod.ko \
+			kernel/drivers/md/dm-bio-prison.ko \
+			kernel/drivers/md/dm-bufio.ko \
+			kernel/drivers/md/persistent-data/dm-persistent-data.ko \
+			kernel/drivers/md/dm-thin-pool.ko; do
+			expected=$(sha256sum "$LVM_MODULE_TREE/$relative" | cut -d ' ' -f1)
+			actual=$(zstd -q -dc "$initrd" | cpio -i --to-stdout \
+				"lib/modules/$release/$relative" 2>/dev/null | sha256sum | cut -d ' ' -f1)
+			[[ "$actual" == "$expected" ]] || {
+				rm -f -- "$listing"
+				die "initrd LVM module does not match selected kernel module tree: $relative"
+			}
+		done
+	fi
 	rm -f -- "$listing"
 	printf 'Installer initrd: Proxmox ISO init and Surface LVM stack detected (%s)\n' "$initrd"
 }
@@ -975,6 +1017,9 @@ main() {
 		need grub-script-check
 		need sha256sum
 	fi
+	if [[ -n "$LVM_MODULE_TREE" ]]; then
+		need sha256sum
+	fi
 
 	if [[ "$WORK_DIR" == "$DEFAULT_WORK_DIR" ]]; then
 		WORK_DIR="$OUTPUT_DIR/.work"
@@ -1002,8 +1047,16 @@ main() {
 	if [[ -n "$INITRD_FILE" ]]; then
 		INITRD_FILE=$(absolute_path "$INITRD_FILE")
 	fi
+	if [[ -n "$LVM_MODULE_TREE" ]]; then
+		LVM_MODULE_TREE=$(absolute_path "$LVM_MODULE_TREE")
+	fi
 	if [[ -n "$WCN7850_FIRMWARE_SOURCE" ]]; then
 		WCN7850_FIRMWARE_SOURCE=$(absolute_path "$WCN7850_FIRMWARE_SOURCE")
+	fi
+	if [[ -n "$LVM_MODULE_TREE" ]]; then
+		[[ -d "$LVM_MODULE_TREE" ]] || die "LVM module tree not found: $LVM_MODULE_TREE"
+		[[ "$(basename "$LVM_MODULE_TREE")" == *surface-laptop-13* ]] ||
+			die "LVM module tree release is not for Surface Laptop 13: $LVM_MODULE_TREE"
 	fi
 	if [[ -n "$EFI_IMAGE" ]]; then
 		EFI_IMAGE=$(absolute_path "$EFI_IMAGE")

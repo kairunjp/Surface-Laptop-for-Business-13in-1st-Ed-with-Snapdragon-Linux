@@ -154,7 +154,11 @@ the Surface kernel's `dm_mod` and thin-pool stack through `/sbin/modprobe`.
 then the init script verifies that the complete stack is active in `/sys/module`.
 The build fails if that loader, any required module, or the LVM userspace tool
 is absent, preventing an installer from reaching `lvcreate` without a working
-device-mapper stack.
+device-mapper stack. When supplying an existing kernel image, also pass its
+matching release directory with `--lvm-module-tree`; the builder replaces the
+five device-mapper modules and module indexes in the initramfs and verifies
+their SHA-256 values. A matching release name or `vermagic` alone is not enough
+to distinguish two kernel builds with different exported symbols.
 
 For an installed system, use `tools/installed-grub-surface-laptop-13` as the
 custom `/etc/grub.d/01_surface-laptop-13`. It arms `surface-el1-ready` before
