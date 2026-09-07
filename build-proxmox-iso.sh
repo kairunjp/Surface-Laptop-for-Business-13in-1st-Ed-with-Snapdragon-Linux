@@ -1185,11 +1185,13 @@ rebuild_iso() {
 	[[ -n "$volume_id" ]] || volume_id=PVE
 
 	log "Rebuilding bootable ISO"
+	# Generate GPT from the new EFI image layout. Copying the input system
+	# area with -G retains stale ESP LBAs and sizes when efi.img moves/grows.
 	xorriso -as mkisofs \
 		-V "$volume_id" \
 		--protective-msdos-label \
 		-partition_cyl_align off \
-		-G "$input_iso" \
+		-efi-boot-part --efi-boot-image \
 		-c /boot/boot.cat \
 		-e /efi.img \
 		-no-emul-boot \
@@ -1227,6 +1229,7 @@ verify_iso() {
 		efi_listing=$(mktemp "$WORK_DIR/iso-efi-list.XXXXXX")
 		efi_cfg=$(mktemp "$WORK_DIR/iso-efi-grub-list.XXXXXX")
 		7z e -so "$output_iso" efi.img >"$efi_image" || die "cannot extract output ISO EFI image"
+		python3 "$ROOT_DIR/tools/verify-iso-esp.py" "$output_iso" "$efi_image"
 		7z l -slt "$efi_image" >"$efi_listing"
 		7z e -so "$efi_image" EFI/BOOT/grub.cfg >"$efi_cfg" || die "output ISO EFI GRUB config is missing"
 		if [[ "$FAT_BOOT" -eq 1 ]]; then

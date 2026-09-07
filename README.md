@@ -253,3 +253,11 @@ The ISO menu declares and exports its own EFI image UUID rather than relying
 on variables set by an earlier GRUB configuration. UUID lookup and chainload
 must succeed before `boot` is issued. Installed root/ESP UUIDs are not used
 in the installer boot path.
+
+The ISO builder generates a new GPT using `-efi-boot-part --efi-boot-image`.
+Do not copy an input ISO's system area with `-G`: its GPT retains the old
+ESP offset and size even when the new `efi.img` has moved or grown. This
+caused USB EFI UUID lookup to fail in v13 despite correct files inside the
+ISO. `tools/verify-iso-esp.py` checks both GPT headers, partition-array CRCs,
+the backup header location, and the ESP bytes at the GPT-specified offset
+against the extracted `efi.img`. The build fails on a mismatch.
