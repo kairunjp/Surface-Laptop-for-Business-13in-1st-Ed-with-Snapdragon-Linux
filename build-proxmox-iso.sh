@@ -544,26 +544,28 @@ menuentry 'Install Proxmox VE (Graphical, Surface EL2/KVM, direct FAT)' --id sur
     echo 'Entering Surface EL2/KVM Secure Launch from the USB FAT volume ...'
     set next_entry=surface-fat-ready-graphical
     if save_env -f "$cmdpath/grubenv" next_entry; then
+        echo 'surface-kvm: USB Ready fallback armed'
+    else
+        echo 'surface-kvm: USB Ready fallback could not be saved; continuing'
+    fi
     chainloader "$cmdpath/surface-kvm-entry.efi"
     boot
-        echo 'surface-kvm: launcher returned; rebooting to USB Ready'
-        reboot
-    else
-        echo 'surface-kvm: cannot save USB Ready fallback; launch cancelled'
-    fi
+    echo 'surface-kvm: launcher returned; rebooting to USB Ready'
+    reboot
 }
 
 menuentry 'Install Proxmox VE (Terminal UI, Surface EL2/KVM, direct FAT)' --id surface-fat-kvm-terminal {
     echo 'Entering Surface EL2/KVM Secure Launch from the USB FAT volume ...'
     set next_entry=surface-fat-ready-terminal
     if save_env -f "$cmdpath/grubenv" next_entry; then
+        echo 'surface-kvm: USB Ready fallback armed'
+    else
+        echo 'surface-kvm: USB Ready fallback could not be saved; continuing'
+    fi
     chainloader "$cmdpath/surface-kvm-entry-terminal.efi"
     boot
-        echo 'surface-kvm: launcher returned; rebooting to USB Ready'
-        reboot
-    else
-        echo 'surface-kvm: cannot save USB Ready fallback; launch cancelled'
-    fi
+    echo 'surface-kvm: launcher returned; rebooting to USB Ready'
+    reboot
 }
 
 menuentry 'Install Proxmox VE - Surface Laptop 13 (FUSE/PVE ready)' --id surface-fat-ready-graphical {
