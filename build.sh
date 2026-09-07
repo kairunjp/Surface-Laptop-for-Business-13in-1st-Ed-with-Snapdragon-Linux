@@ -285,7 +285,9 @@ build_dtb() {
 	# the baseline silently dropped the Bluetooth UART and fingerprint USB host
 	# that are present in the installed/ready entry, making EL1/EL2 comparison
 	# unnecessarily ambiguous.
-	fdtoverlay -i "$bluetooth_fingerprint_dtb" -o "$el2_dtb" "$el2_overlay"
+	# Use the same DSP and backlight settings as the validated installed boot.
+	bash "$PUBLIC_DIR/tools/build-surface-el2-from-ready.sh" "$bluetooth_fingerprint_dtb" "$el2_dtb"
+	bash "$PUBLIC_DIR/tools/build-surface-el2-from-ready.sh" "$bluetooth_fingerprint_dtb" "$DTB_OUT/surface-laptop-13-el2-without-ufs.dtb" --disable-ufs
 	for candidate in "$base_dtb" "$bluetooth_dtb"; do
 		[[ -s "$candidate" ]] || die "empty DTB: $candidate"
 		[[ "$(fdtget "$candidate" /soc@0/usb@a600000 dr_mode)" == host ]] || die "USB-C port 0 is not host in $candidate"

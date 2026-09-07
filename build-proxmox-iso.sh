@@ -1439,6 +1439,11 @@ main() {
 	fi
 	if [[ -n "$EL2_DTB_FILE" ]]; then
 		[[ -f "$EL2_DTB_FILE" ]] || die "EL2 DTB not found: $EL2_DTB_FILE"
+		# Reject the generic DSP-enabled tree that regressed v19 on Surface.
+		for node in /soc@0/remoteproc@6800000 /soc@0/remoteproc@32300000 /sound; do
+			[[ $(fdtget "$EL2_DTB_FILE" "$node" status) == disabled ]] ||
+				die "Surface EL2 DTB must disable $node (DSP/SMMU boot regression)"
+		done
 		[[ -n "$EFI_IMAGE" ]] || die "--efi-image is required with --el2-dtb (it supplies the Secure Launch bridge)"
 		verify_efi_tcb "$EFI_IMAGE"
 		verify_efi_slbounce "$EFI_IMAGE"
