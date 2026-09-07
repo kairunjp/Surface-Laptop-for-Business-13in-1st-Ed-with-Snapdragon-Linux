@@ -334,6 +334,7 @@ verify_efi_default_shim() {
 
 patch_proxmox_initrd_lvm() {
 	local initrd=$1 raw_initrd init_file manifest patched compressed release relative source metadata
+	local installer_module
 	raw_initrd=$(mktemp "$WORK_DIR/proxmox-initrd-lvm-raw.XXXXXX.img")
 	init_file=$(mktemp "$WORK_DIR/proxmox-init-lvm.XXXXXX")
 	manifest=$(mktemp "$WORK_DIR/proxmox-initrd-lvm.XXXXXX.manifest")
@@ -353,8 +354,19 @@ patch_proxmox_initrd_lvm() {
 	cpio -i --to-stdout init 2>/dev/null <"$raw_initrd" >"$init_file" ||
 		die "cannot extract Proxmox installer init from $initrd"
 	python3 "$ROOT_DIR/initramfs/scripts/patch-proxmox-init-lvm.py" "$init_file"
+	# Patch the installer's second stage too: its target-chroot efivarfs mount
+	# otherwise aborts installation on this Surface after the GUI has started.
+	installer_module=$(mktemp "$WORK_DIR/proxmox-installer-efi.XXXXXX.pm")
+	unsquashfs -cat "$STAGE_DIR/pve-installer.squashfs" \
+		usr/share/perl5/Proxmox/Install.pm >"$installer_module" ||
+		die "cannot extract Proxmox::Install from the selected ISO"
+	python3 "$ROOT_DIR/initramfs/scripts/patch-proxmox-installer-efi.py" \
+		"$installer_module" "$init_file"
 	sh -n "$init_file"
 	printf 'init %s 0755\n' "$init_file" >"$manifest"
+	printf 'surface-installer/Install.pm %s 0644\n' "$installer_module" >>"$manifest"
+	printf 'surface-installer/SurfaceEFI.pm %s 0644\n' \
+		"$ROOT_DIR/initramfs/installer/SurfaceEFI.pm" >>"$manifest"
 	if [[ -n "$LVM_MODULE_TREE" ]]; then
 		release=$(basename "$LVM_MODULE_TREE")
 		for relative in \
@@ -377,7 +389,7 @@ patch_proxmox_initrd_lvm() {
 	zstd -q -T0 -19 -f "$patched" -o "$compressed"
 	mv -- "$compressed" "$initrd"
 	zstd -q -dc "$initrd" | cpio -it --quiet >/dev/null
-	rm -f -- "$raw_initrd" "$init_file" "$manifest" "$patched"
+	rm -f -- "$raw_initrd" "$init_file" "$manifest" "$patched" "$installer_module"
 }
 
 verify_proxmox_installer_initrd() {
@@ -393,6 +405,11 @@ verify_proxmox_installer_initrd() {
 		die "initrd is not a Proxmox installer initrd (.cd-info is missing): $initrd"
 	}
 	init_text=$(zstd -q -dc "$initrd" | cpio -i --to-stdout init 2>/dev/null || true)
+	for required in surface-installer/Install.pm surface-installer/SurfaceEFI.pm; do
+		grep -Fxq "$required" "$listing" || die "installer EFI fallback payload is missing: $required"
+	done
+	grep -Fq 'cp /surface-installer/Install.pm "$surface_perl_dir/Install.pm"' <<<"$init_text" ||
+		die "installer init does not activate the Surface EFI fallback"
 	if ! grep -Fq 'Proxmox Server Solutions' <<<"$init_text"; then
 		rm -f -- "$listing"
 		die "initrd has generic root-mount logic; use the Proxmox installer initrd instead: $initrd"
@@ -1305,6 +1322,7 @@ main() {
 	need xorriso
 	need 7z
 	need cpio
+	need unsquashfs
 	need python3
 	need sed
 	need grep

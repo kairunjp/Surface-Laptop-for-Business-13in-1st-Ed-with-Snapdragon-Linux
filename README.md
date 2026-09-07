@@ -169,6 +169,17 @@ The ISO check extracts the LVM tree without `cpio -d`: a module listed in an
 archive but lacking its parent directory cannot be created by Linux's initramfs
 unpacker. This check covers `persistent-data/dm-persistent-data.ko` in particular.
 
+The Surface Laptop for Business 13-inch (2095) firmware exposes EFI boot
+services but the current Qualcomm kernel does not expose EFI variables through
+`qseecom`, so `efivarfs` returns `Operation not supported`. The installer initrd
+recognizes this exact compatible string, keeps EFI installation enabled, and
+patches the Proxmox second-stage installer to continue without efivars. Its
+`grub-install` call uses `--no-nvram --force-extra-removable`, so the installed
+ESP boots through `EFI/BOOT/BOOTAA64.EFI` without requiring a `Boot####` write.
+Other machines still fail on an unexpected efivarfs mount error. The builder
+extracts the selected ISO's `Proxmox::Install` module and verifies that the
+patched initrd contains both the replacement module and its EFI fallback helper.
+
 For an installed system, use `tools/installed-grub-surface-laptop-13` as the
 custom `/etc/grub.d/01_surface-laptop-13`. It arms `surface-el1-ready` before
 the Secure Launch handoff, so an early reset falls back to Ready. Install
