@@ -348,6 +348,26 @@ EOF
 	fi
 }
 
+patch_iso_efi_grub_cfg() {
+	local efi_image=$1
+	local cfg
+
+	cfg=$(mktemp "$WORK_DIR/iso-efi-grub.XXXXXX")
+	mcopy -i "$efi_image" ::/EFI/BOOT/grub.cfg "$cfg" >/dev/null
+	# The source Proxmox EFI image embeds the UUID of the ISO it was built
+	# from.  Rebuilding with xorriso gives the output ISO a new UUID, so the
+	# original search can fail and firmware may fall through to the installed
+	# PVE entry.  Locate the ISO by its installer kernel instead; that path is
+	# unique to the ISO and remains valid across rebuilds and USB devices.
+	sed -i -E 's|^search --fs-uuid --set=root .*$|search --no-floppy --file --set=root /boot/linux26|' "$cfg"
+	grep -Fq 'search --no-floppy --file --set=root /boot/linux26' "$cfg" || {
+		rm -f -- "$cfg"
+		die "could not make the embedded EFI GRUB config locate the ISO"
+	}
+	mcopy -i "$efi_image" -o "$cfg" ::/EFI/BOOT/grub.cfg >/dev/null
+	rm -f -- "$cfg"
+}
+
 remove_existing_el2_grub_entries() {
 	local grub_cfg=$1
 	python3 - "$grub_cfg" <<'PY'
@@ -610,7 +630,7 @@ verify_iso() {
 	local output_iso=$1
 	local dtb_path=$2
 	local el2_dtb_path=${3:-}
-	local listing efi_image efi_listing boot_hash shim_hash
+	local listing efi_image efi_listing efi_cfg boot_hash shim_hash
 	local xorriso_input=$output_iso
 	[[ -s "$output_iso" ]] || die "output ISO was not created: $output_iso"
 	# xorriso treats paths below /dev as possible device nodes.  The build
@@ -634,15 +654,19 @@ verify_iso() {
 		# builder is meant to prevent.
 		efi_image=$(mktemp "$WORK_DIR/iso-efi.XXXXXX.img")
 		efi_listing=$(mktemp "$WORK_DIR/iso-efi-list.XXXXXX")
+		efi_cfg=$(mktemp "$WORK_DIR/iso-efi-grub-list.XXXXXX")
 		7z e -so "$output_iso" efi.img >"$efi_image" || die "cannot extract output ISO EFI image"
 		7z l -slt "$efi_image" >"$efi_listing"
+		7z e -so "$efi_image" EFI/BOOT/grub.cfg >"$efi_cfg" || die "output ISO EFI GRUB config is missing"
+		grep -Fq 'search --no-floppy --file --set=root /boot/linux26' "$efi_cfg" ||
+			die "output ISO EFI GRUB config still uses a stale filesystem UUID"
 		if grep -Eiq '^Path = (EFI/(BOOT|PROXMOX)/.*(surface-kvm|slbounce|surface-laptop-13-el2)|surface-laptop-13-el2\.dtb|tcblaunch\.exe|startup\.nsh)' "$efi_listing"; then
 			die "output ISO EFI image still contains a duplicate Surface KVM payload"
 		fi
 		boot_hash=$(7z e -so "$efi_image" EFI/BOOT/BOOTAA64.EFI 2>/dev/null | sha256sum | cut -d ' ' -f1)
 		shim_hash=$(7z e -so "$efi_image" EFI/BOOT/shimaa64.efi 2>/dev/null | sha256sum | cut -d ' ' -f1)
 		[[ -n "$boot_hash" && "$boot_hash" == "$shim_hash" ]] || die "output ISO default EFI is not the normal Proxmox shim"
-		rm -f -- "$efi_image" "$efi_listing"
+		rm -f -- "$efi_image" "$efi_listing" "$efi_cfg"
 	fi
 	xorriso -indev "$xorriso_input" -report_el_torito as_mkisofs >/dev/null
 	rm -f -- "$listing"
@@ -657,8 +681,8 @@ main() {
 	need sed
 	need grep
 	need file
+	need mcopy
 	if [[ -n "$EL2_DTB_FILE" ]]; then
-		need mcopy
 		need mdel
 		need grub-mkstandalone
 		need sha256sum
@@ -749,6 +773,7 @@ main() {
 	if [[ -n "$EFI_IMAGE" ]]; then
 		cp --preserve=mode,timestamps "$EFI_IMAGE" "$STAGE_DIR/efi.img"
 	fi
+	patch_iso_efi_grub_cfg "$STAGE_DIR/efi.img"
 	if [[ -n "$EL2_DTB_FILE" ]]; then
 		install_kvm_iso_bridge "$EFI_IMAGE"
 	fi

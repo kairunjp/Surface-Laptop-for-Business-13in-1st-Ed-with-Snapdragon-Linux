@@ -129,6 +129,9 @@ environment. The builder keeps that KVM payload only on the ISO9660 volume;
 the embedded FAT image retains the normal PVE shim/GRUB path. This is
 intentional because the EFI launcher rejects ambiguous volumes when both the
 ISO and the El Torito FAT image contain a complete KVM payload.
+The embedded FAT GRUB configuration is rewritten to find `/boot/linux26`
+instead of retaining the source ISO's filesystem UUID, so firmware cannot
+fall through to an installed PVE disk after the ISO is rebuilt.
 `build-proxmox-iso.sh` accepts `EL2_KERNEL_ARGS` when a different Qualcomm
 firmware needs a platform-specific EL2 command line.
 
