@@ -24,6 +24,8 @@ BUILD_MISSING=1
 INCLUDE_MODULES=1
 GRUB_MODULE_DIR=${GRUB_MODULE_DIR:-}
 ALLOW_UNTESTED_TCB=${ALLOW_UNTESTED_TCB:-0}
+FAT_BOOT=${FAT_BOOT:-0}
+FAT_BOOT_SIZE=${FAT_BOOT_SIZE:-268435456}
 
 # X1P42100 reference TCB validated with the Surface Secure Launch path.
 KNOWN_GOOD_TCB_SHA256=5dfcd0253b6ee99499ab33cac221e8a9cea47f3fdf6d4e11de9a9f3c4770d03d
@@ -79,6 +81,8 @@ Options:
                       Add ath12k/WCN7850 Wi-Fi firmware to the ISO initrd.
   --no-initrd-modules Keep the selected initrd without adding built modules.
   --allow-untested-tcb Permit an EFI image containing another TCB build.
+  --fat-boot          Put kernel/initramfs/DTBs/KVM EFI payload in one El Torito
+                      FAT image and boot it through cmdpath without disk search.
   --work DIR          Scratch directory (default: ./build/.work).
   --no-build           Fail if --kernel-image or --dtb is missing.
   -h, --help          Show this help.
@@ -158,6 +162,9 @@ parse_args() {
 				;;
 			--allow-untested-tcb)
 				ALLOW_UNTESTED_TCB=1
+				;;
+			--fat-boot)
+				FAT_BOOT=1
 				;;
 			--work)
 				shift
@@ -404,9 +411,11 @@ PY
 build_standalone_kvm_grub() {
 	local mode=$1
 	local output=$2
+	local payload_mode=${3:-iso}
 	local extra=
 	local config="$WORK_DIR/surface-kvm-grub-$mode.cfg"
 	local grub_dir=${GRUB_MODULE_DIR:-}
+	local modules='efi_gop linux fdt test halt'
 
 	if [[ -z "$grub_dir" ]]; then
 		if [[ -f "$STAGE_DIR/boot/grub/arm64-efi/kernel.img" ]]; then
@@ -421,7 +430,34 @@ build_standalone_kvm_grub() {
 		extra=" proxtui"
 	fi
 
-	cat >"$config" <<EOF
+	if [[ "$payload_mode" == fat ]]; then
+		modules+=' fat'
+		cat >"$config" <<EOF
+set timeout=0
+echo 'Loading Surface EL2/KVM installer from the EFI FAT volume ...'
+set surface_kernel="\$cmdpath/surface-kvm-linux"
+set surface_dtb="\$cmdpath/surface-laptop-13-el2.dtb"
+set surface_initrd="\$cmdpath/surface-kvm-initrd.img"
+if ! [ -s "\$surface_kernel" ]; then
+    echo 'surface-kvm: FAT kernel missing or empty'
+    halt
+fi
+if ! [ -s "\$surface_dtb" ]; then
+    echo 'surface-kvm: FAT EL2 DTB missing or empty'
+    halt
+fi
+if ! [ -s "\$surface_initrd" ]; then
+    echo 'surface-kvm: FAT initramfs missing or empty'
+    halt
+fi
+linux "\$surface_kernel" ro ramdisk_size=16777216 rw quiet splash=silent $EL2_KERNEL_ARGS$extra
+devicetree "\$surface_dtb"
+initrd "\$surface_initrd"
+boot
+EOF
+	else
+		modules+=' iso9660 search_fs_file'
+		cat >"$config" <<EOF
 set timeout=0
 insmod iso9660
 search --no-floppy --file --set=root /boot/linux26
@@ -431,27 +467,105 @@ devicetree /boot/$EL2_DTB_NAME
 initrd /boot/initrd.img
 boot
 EOF
+	fi
+	grub-script-check "$config"
 
 	grub-mkstandalone \
 		-d "$grub_dir" \
 		-O arm64-efi \
 		--disable-shim-lock \
-		--modules='efi_gop iso9660 search_fs_file linux fdt' \
+		--modules="$modules" \
 		-o "$output" \
 		"/boot/grub/grub.cfg=$config" >/dev/null
 	rm -f -- "$config"
 }
 
-install_kvm_iso_bridge() {
-	local efi_image=$1
-	local bridge_dir="$STAGE_DIR/EFI/BOOT"
-	local payload_dir payload_listing
+build_fatboot_efi_image() {
+	local source_image=$1
+	local output_image=$2
+	local payload_dir cfg
 
-	mkdir -p "$bridge_dir"
-	log "Installing ISO EL2/KVM Secure Launch bridge"
-	# A rebuild may use an ISO which already contains a partial KVM payload.
-	# Remove those files before copying the selected payload so stale Shell or
-	# DTB files cannot turn the new ISO into a second, different boot path.
+	payload_dir=$(mktemp -d "$WORK_DIR/fatboot-payload.XXXXXX")
+	cfg="$payload_dir/grub.cfg"
+
+	# Retain the shim and GRUB binaries from the known-good Proxmox EFI image.
+	# Only their external configuration changes for this search-free layout.
+	mcopy -i "$source_image" ::/EFI/BOOT/BOOTAA64.EFI "$payload_dir/BOOTAA64.EFI" >/dev/null
+	mcopy -i "$source_image" ::/EFI/BOOT/shimaa64.efi "$payload_dir/shimaa64.efi" >/dev/null
+	mcopy -i "$source_image" ::/EFI/BOOT/grubaa64.efi "$payload_dir/grubaa64.efi" >/dev/null
+	mcopy -i "$source_image" ::/EFI/BOOT/surface-kvm-entry.efi "$payload_dir/surface-kvm-entry.efi" >/dev/null
+	mcopy -i "$source_image" ::/EFI/BOOT/slbounceaa64.efi "$payload_dir/slbounceaa64.efi" >/dev/null
+	mcopy -i "$source_image" ::/tcblaunch.exe "$payload_dir/tcblaunch.exe" >/dev/null
+	cp -- "$payload_dir/surface-kvm-entry.efi" "$payload_dir/surface-kvm-entry-terminal.efi"
+	build_standalone_kvm_grub graphical "$payload_dir/surface-kvm-grubaa64.efi" fat
+	build_standalone_kvm_grub terminal "$payload_dir/surface-kvm-grub-terminal.efi" fat
+
+	cat >"$cfg" <<'EOF'
+set timeout=10
+set default=surface-fat-kvm-graphical
+terminal_input console
+terminal_output console
+
+menuentry 'Install Proxmox VE (Graphical, Surface EL2/KVM, direct FAT)' --id surface-fat-kvm-graphical {
+    echo 'Starting Surface EL2/KVM from the EFI FAT volume ...'
+    chainloader "$cmdpath/surface-kvm-entry.efi"
+    boot
+    echo 'surface-kvm: launcher returned; reboot before using Ready'
+    reboot
+}
+
+menuentry 'Install Proxmox VE (Terminal UI, Surface EL2/KVM, direct FAT)' --id surface-fat-kvm-terminal {
+    echo 'Starting Surface EL2/KVM terminal installer from the EFI FAT volume ...'
+    chainloader "$cmdpath/surface-kvm-entry-terminal.efi"
+    boot
+    echo 'surface-kvm: launcher returned; reboot before using Ready'
+    reboot
+}
+
+menuentry 'Install Proxmox VE (Graphical, Surface PVE Ready, direct FAT)' --id surface-fat-ready-graphical {
+    linux "$cmdpath/surface-kvm-linux" ro ramdisk_size=16777216 rw quiet splash=silent
+    devicetree "$cmdpath/surface-laptop-13-current.dtb"
+    initrd "$cmdpath/surface-kvm-initrd.img"
+    boot
+}
+
+menuentry 'Install Proxmox VE (Terminal UI, Surface PVE Ready, direct FAT)' --id surface-fat-ready-terminal {
+    linux "$cmdpath/surface-kvm-linux" ro ramdisk_size=16777216 rw quiet splash=silent proxtui
+    devicetree "$cmdpath/surface-laptop-13-current.dtb"
+    initrd "$cmdpath/surface-kvm-initrd.img"
+    boot
+}
+EOF
+	grub-script-check "$cfg"
+
+	log "Building search-free self-contained EFI FAT boot image"
+	rm -f -- "$output_image"
+	truncate -s "$FAT_BOOT_SIZE" "$output_image"
+	MTOOLS_SKIP_CHECK=1 mformat -i "$output_image" -F -v SURFKVM :: >/dev/null
+	mmd -i "$output_image" ::/EFI >/dev/null
+	mmd -i "$output_image" ::/EFI/BOOT >/dev/null
+	mcopy -i "$output_image" -o "$payload_dir/BOOTAA64.EFI" ::/EFI/BOOT/BOOTAA64.EFI >/dev/null
+	mcopy -i "$output_image" -o "$payload_dir/shimaa64.efi" ::/EFI/BOOT/shimaa64.efi >/dev/null
+	mcopy -i "$output_image" -o "$payload_dir/grubaa64.efi" ::/EFI/BOOT/grubaa64.efi >/dev/null
+	mcopy -i "$output_image" -o "$cfg" ::/EFI/BOOT/grub.cfg >/dev/null
+	mcopy -i "$output_image" -o "$payload_dir/surface-kvm-entry.efi" ::/EFI/BOOT/surface-kvm-entry.efi >/dev/null
+	mcopy -i "$output_image" -o "$payload_dir/surface-kvm-entry-terminal.efi" ::/EFI/BOOT/surface-kvm-entry-terminal.efi >/dev/null
+	mcopy -i "$output_image" -o "$payload_dir/slbounceaa64.efi" ::/EFI/BOOT/slbounceaa64.efi >/dev/null
+	mcopy -i "$output_image" -o "$payload_dir/surface-kvm-grubaa64.efi" ::/EFI/BOOT/surface-kvm-grubaa64.efi >/dev/null
+	mcopy -i "$output_image" -o "$payload_dir/surface-kvm-grub-terminal.efi" ::/EFI/BOOT/surface-kvm-grub-terminal.efi >/dev/null
+	mcopy -i "$output_image" -o "$KERNEL_IMAGE" ::/EFI/BOOT/surface-kvm-linux >/dev/null
+	mcopy -i "$output_image" -o "$STAGE_DIR/boot/initrd.img" ::/EFI/BOOT/surface-kvm-initrd.img >/dev/null
+	mcopy -i "$output_image" -o "$DTB_FILE" ::/EFI/BOOT/surface-laptop-13-current.dtb >/dev/null
+	mcopy -i "$output_image" -o "$EL2_DTB_FILE" ::/EFI/BOOT/surface-laptop-13-el2.dtb >/dev/null
+	mcopy -i "$output_image" -o "$EL2_DTB_FILE" ::/surface-laptop-13-el2.dtb >/dev/null
+	mcopy -i "$output_image" -o "$payload_dir/tcblaunch.exe" ::/tcblaunch.exe >/dev/null
+
+	rm -rf -- "$payload_dir"
+}
+
+clear_iso_kvm_bridge() {
+	local bridge_dir="$STAGE_DIR/EFI/BOOT"
+
 	rm -f -- \
 		"$bridge_dir/surface-kvm-entry.efi" \
 		"$bridge_dir/surface-kvm-entry-terminal.efi" \
@@ -465,6 +579,19 @@ install_kvm_iso_bridge() {
 		"$STAGE_DIR/surface-laptop-13-el2.dtb" \
 		"$STAGE_DIR/tcblaunch.exe" \
 		"$STAGE_DIR/startup.nsh"
+}
+
+install_kvm_iso_bridge() {
+	local efi_image=$1
+	local bridge_dir="$STAGE_DIR/EFI/BOOT"
+	local payload_dir payload_listing
+
+	mkdir -p "$bridge_dir"
+	log "Installing ISO EL2/KVM Secure Launch bridge"
+	# A rebuild may use an ISO which already contains a partial KVM payload.
+	# Remove those files before copying the selected payload so stale Shell or
+	# DTB files cannot turn the new ISO into a second, different boot path.
+	clear_iso_kvm_bridge
 	# The chainloaded launcher sees the ISO filesystem as its device volume.
 	# Keep every file it needs on that same filesystem rather than relying on
 	# the read-only EFI system image's GRUB environment.
@@ -630,7 +757,7 @@ verify_iso() {
 	local output_iso=$1
 	local dtb_path=$2
 	local el2_dtb_path=${3:-}
-	local listing efi_image efi_listing efi_cfg boot_hash shim_hash
+	local listing efi_image efi_listing efi_cfg boot_hash shim_hash required
 	local xorriso_input=$output_iso
 	[[ -s "$output_iso" ]] || die "output ISO was not created: $output_iso"
 	# xorriso treats paths below /dev as possible device nodes.  The build
@@ -646,22 +773,39 @@ verify_iso() {
 	grep -Fq "Path = boot/$dtb_path" "$listing" || die "Surface DTB is missing from output ISO"
 	if [[ -n "$el2_dtb_path" ]]; then
 		grep -Fq "Path = boot/$el2_dtb_path" "$listing" || die "EL2 DTB is missing from output ISO"
-		grep -Fqi "Path = EFI/BOOT/surface-kvm-entry.efi" "$listing" || die "EL2/KVM bridge launcher is missing from output ISO"
-		grep -Fqi "Path = EFI/BOOT/surface-kvm-grubaa64.efi" "$listing" || die "EL2/KVM standalone GRUB is missing from output ISO"
-		# The ISO launcher must have exactly one complete payload volume.  The
-		# embedded FAT image is deliberately kept as the normal PVE boot path;
-		# retaining any KVM marker there would reintroduce the ambiguity this
-		# builder is meant to prevent.
 		efi_image=$(mktemp "$WORK_DIR/iso-efi.XXXXXX.img")
 		efi_listing=$(mktemp "$WORK_DIR/iso-efi-list.XXXXXX")
 		efi_cfg=$(mktemp "$WORK_DIR/iso-efi-grub-list.XXXXXX")
 		7z e -so "$output_iso" efi.img >"$efi_image" || die "cannot extract output ISO EFI image"
 		7z l -slt "$efi_image" >"$efi_listing"
 		7z e -so "$efi_image" EFI/BOOT/grub.cfg >"$efi_cfg" || die "output ISO EFI GRUB config is missing"
-		grep -Fq 'search --no-floppy --file --set=root /boot/linux26' "$efi_cfg" ||
-			die "output ISO EFI GRUB config still uses a stale filesystem UUID"
-		if grep -Eiq '^Path = (EFI/(BOOT|PROXMOX)/.*(surface-kvm|slbounce|surface-laptop-13-el2)|surface-laptop-13-el2\.dtb|tcblaunch\.exe|startup\.nsh)' "$efi_listing"; then
-			die "output ISO EFI image still contains a duplicate Surface KVM payload"
+		if [[ "$FAT_BOOT" -eq 1 ]]; then
+			for required in \
+				EFI/BOOT/surface-kvm-entry.efi \
+				EFI/BOOT/surface-kvm-grubaa64.efi \
+				EFI/BOOT/surface-kvm-linux \
+				EFI/BOOT/surface-kvm-initrd.img \
+				EFI/BOOT/surface-laptop-13-current.dtb \
+				EFI/BOOT/surface-laptop-13-el2.dtb \
+				EFI/BOOT/slbounceaa64.efi \
+				tcblaunch.exe; do
+				grep -Fqi "Path = $required" "$efi_listing" || die "search-free EFI FAT payload is missing $required"
+			done
+			grep -Fq 'surface-fat-kvm-graphical' "$efi_cfg" || die "search-free EFI FAT menu is missing"
+			if grep -Eq '^[[:space:]]*search([[:space:]]|$)' "$efi_cfg"; then
+				die "search-free EFI FAT menu still scans disks"
+			fi
+			if grep -Eiq '^Path = EFI/BOOT/(surface-kvm-entry|surface-kvm-grub|slbounce)' "$listing"; then
+				die "search-free ISO contains a duplicate KVM payload outside efi.img"
+			fi
+		else
+			grep -Fqi "Path = EFI/BOOT/surface-kvm-entry.efi" "$listing" || die "EL2/KVM bridge launcher is missing from output ISO"
+			grep -Fqi "Path = EFI/BOOT/surface-kvm-grubaa64.efi" "$listing" || die "EL2/KVM standalone GRUB is missing from output ISO"
+			grep -Fq 'search --no-floppy --file --set=root /boot/linux26' "$efi_cfg" ||
+				die "output ISO EFI GRUB config still uses a stale filesystem UUID"
+			if grep -Eiq '^Path = (EFI/(BOOT|PROXMOX)/.*(surface-kvm|slbounce|surface-laptop-13-el2)|surface-laptop-13-el2\.dtb|tcblaunch\.exe|startup\.nsh)' "$efi_listing"; then
+				die "output ISO EFI image still contains a duplicate Surface KVM payload"
+			fi
 		fi
 		boot_hash=$(7z e -so "$efi_image" EFI/BOOT/BOOTAA64.EFI 2>/dev/null | sha256sum | cut -d ' ' -f1)
 		shim_hash=$(7z e -so "$efi_image" EFI/BOOT/shimaa64.efi 2>/dev/null | sha256sum | cut -d ' ' -f1)
@@ -682,9 +826,15 @@ main() {
 	need grep
 	need file
 	need mcopy
+	if [[ "$FAT_BOOT" -eq 1 ]]; then
+		need mformat
+		need mmd
+		need truncate
+	fi
 	if [[ -n "$EL2_DTB_FILE" ]]; then
 		need mdel
 		need grub-mkstandalone
+		need grub-script-check
 		need sha256sum
 	fi
 
@@ -728,6 +878,11 @@ main() {
 	[[ "$INPUT_ISO" != "$OUTPUT_ISO" ]] || die "input and output ISO must be different files"
 	[[ "$DTB_NAME" != */* && "$DTB_NAME" != "" ]] || die "--dtb-name must be a file name without '/': $DTB_NAME"
 	[[ "$EL2_DTB_NAME" != */* && "$EL2_DTB_NAME" != "" ]] || die "--el2-dtb-name must be a file name without '/': $EL2_DTB_NAME"
+	if [[ "$FAT_BOOT" -eq 1 ]]; then
+		[[ -n "$EL2_DTB_FILE" && -n "$EFI_IMAGE" ]] || die "--fat-boot requires --el2-dtb and --efi-image"
+		[[ "$FAT_BOOT_SIZE" =~ ^[0-9]+$ && "$FAT_BOOT_SIZE" -ge 167772160 ]] ||
+			die "FAT_BOOT_SIZE must be at least 167772160 bytes"
+	fi
 	if [[ -n "$INITRD_FILE" ]]; then
 		[[ -f "$INITRD_FILE" ]] || die "initrd not found: $INITRD_FILE"
 	fi
@@ -773,8 +928,10 @@ main() {
 	if [[ -n "$EFI_IMAGE" ]]; then
 		cp --preserve=mode,timestamps "$EFI_IMAGE" "$STAGE_DIR/efi.img"
 	fi
-	patch_iso_efi_grub_cfg "$STAGE_DIR/efi.img"
-	if [[ -n "$EL2_DTB_FILE" ]]; then
+	if [[ "$FAT_BOOT" -eq 0 ]]; then
+		patch_iso_efi_grub_cfg "$STAGE_DIR/efi.img"
+	fi
+	if [[ -n "$EL2_DTB_FILE" && "$FAT_BOOT" -eq 0 ]]; then
 		install_kvm_iso_bridge "$EFI_IMAGE"
 	fi
 	if [[ -n "$INITRD_FILE" ]]; then
@@ -786,7 +943,13 @@ main() {
 	patch_grub_config "$STAGE_DIR/boot/grub/grub.cfg" "$DTB_NAME"
 	if [[ -n "$EL2_DTB_FILE" ]]; then
 		remove_existing_el2_grub_entries "$STAGE_DIR/boot/grub/grub.cfg"
-		append_el2_grub_entries "$STAGE_DIR/boot/grub/grub.cfg"
+		if [[ "$FAT_BOOT" -eq 0 ]]; then
+			append_el2_grub_entries "$STAGE_DIR/boot/grub/grub.cfg"
+		fi
+	fi
+	if [[ "$FAT_BOOT" -eq 1 ]]; then
+		clear_iso_kvm_bridge
+		build_fatboot_efi_image "$EFI_IMAGE" "$STAGE_DIR/efi.img"
 	fi
 
 	rm -f -- "$OUTPUT_ISO"

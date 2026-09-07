@@ -135,6 +135,14 @@ fall through to an installed PVE disk after the ISO is rebuilt.
 `build-proxmox-iso.sh` accepts `EL2_KERNEL_ARGS` when a different Qualcomm
 firmware needs a platform-specific EL2 command line.
 
+For firmware which does not reliably expose the ISO9660 filesystem to GRUB,
+pass `--fat-boot`. This creates a 256 MiB El Torito FAT image containing the
+kernel, installer initramfs, both DTBs, and the complete Secure Launch chain.
+The normal Proxmox shim and GRUB binaries are retained, while the FAT GRUB menu
+loads every boot file relative to its own `$cmdpath`; it performs no disk,
+partition, label, UUID, or marker search. The direct FAT menu keeps both KVM
+and PVE Ready installer entries, with KVM selected by default.
+
 For an installed system, use `tools/installed-grub-surface-laptop-13` as the
 custom `/etc/grub.d/01_surface-laptop-13`. It arms `surface-el1-ready` before
 the Secure Launch handoff, so an early reset falls back to Ready. Install
