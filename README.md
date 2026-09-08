@@ -130,6 +130,13 @@ The DSP files are copied into both the installer initramfs and live SquashFS
 and checked by SHA-256.  The LVM module tree is matched against the exact
 kernel Image; a same-named release from another kernel build is rejected.
 
+The installer SquashFS is an overlay above the Debian base. Firmware goes
+under `usr/lib/firmware` in this layer: creating a real `lib` directory hides
+the base's `lib -> usr/lib` symlink and breaks the ARM64 ELF interpreter.
+The builder repairs older Surface inputs and rejects directories that hide
+the base's `lib`, `bin`, or `sbin` links. The Wi-Fi helper waits for the built-in
+driver's initial probe and does not forcibly unbind/rebind PCI devices.
+
 The live installer runs under a static BusyBox PID 1 supervisor so a failed
 installer process leaves a recovery shell and its exit status instead of a
 kernel panic. Extract `busybox-static:arm64` and set `INSTALLER_BUSYBOX` to its

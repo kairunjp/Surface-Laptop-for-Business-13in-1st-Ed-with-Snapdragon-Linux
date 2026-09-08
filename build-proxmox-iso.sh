@@ -467,17 +467,24 @@ augment_proxmox_installer_squashfs() {
 	rm -f -- "$output_dir"
 	log "Adding Surface firmware and optional NetworkManager to the installer live environment"
 	unsquashfs -no-xattrs -d "$root_dir" "$squashfs" >/dev/null
+	# A directory in this upper layer hides the base /lib -> usr/lib link
+	# and its ELF interpreter. Repair older ISO inputs before adding files.
+	if [[ -d "$root_dir/lib" && ! -L "$root_dir/lib" ]]; then
+		mkdir -p "$root_dir/usr/lib"
+		cp -a "$root_dir/lib"/. "$root_dir/usr/lib"/
+		rm -rf -- "$root_dir/lib"
+	fi
 	if [[ -n "$NETWORK_MANAGER_PACKAGE_DIR" ]]; then
 		for package in "${NETWORK_MANAGER_PACKAGE_FILES[@]}"; do
 			dpkg-deb -x "$package" "$root_dir"
 		done
 	fi
 	if [[ -n "$FIRMWARE_SOURCE" ]]; then
-		mkdir -p "$root_dir/lib/firmware"
-		cp -a "$FIRMWARE_SOURCE"/. "$root_dir/lib/firmware"/
+		mkdir -p "$root_dir/usr/lib/firmware"
+		cp -a "$FIRMWARE_SOURCE"/. "$root_dir/usr/lib/firmware"/
 	fi
 	if [[ -n "$WCN7850_FIRMWARE_SOURCE" ]]; then
-		wifi_firmware_dir="$root_dir/lib/firmware/ath12k/WCN7850/hw2.0"
+		wifi_firmware_dir="$root_dir/usr/lib/firmware/ath12k/WCN7850/hw2.0"
 		mkdir -p "$wifi_firmware_dir"
 		cp -a "$WCN7850_FIRMWARE_SOURCE"/. "$wifi_firmware_dir"/
 	fi
@@ -510,7 +517,7 @@ managed=true
 EOF
 	cat >"$root_dir/usr/local/sbin/surface-wifi-start" <<'EOF'
 #!/bin/sh
-# Reprobe WCN7850 after the installer SquashFS is mounted, then start the live
+# Wait for WCN7850's initial probe, then start the live
 # installer's NetworkManager without relying on systemd or a SysV init script.
 set -u
 
@@ -521,27 +528,10 @@ surface_wifi_present() {
     return 1
 }
 
-if ! surface_wifi_present; then
-    for pci_device in /sys/bus/pci/devices/*; do
-        [ -r "$pci_device/vendor" ] || continue
-        [ -r "$pci_device/device" ] || continue
-        [ "$(cat "$pci_device/vendor")" = "0x17cb" ] || continue
-        [ "$(cat "$pci_device/device")" = "0x1107" ] || continue
-
-        pci_address=${pci_device##*/}
-        echo "surface-wifi: reprobe WCN7850 at $pci_address" >&2
-        if [ -L "$pci_device/driver" ]; then
-            pci_driver=$(readlink -f "$pci_device/driver")
-            echo "$pci_address" >"$pci_driver/unbind" || true
-            sleep 1
-            echo "$pci_address" >"$pci_driver/bind" || true
-        else
-            echo "$pci_address" >/sys/bus/pci/drivers_probe || true
-        fi
-    done
-    command -v udevadm >/dev/null 2>&1 && udevadm settle || true
-    sleep 2
-fi
+for wifi_wait in 1 2 3 4 5 6 7 8 9 10; do
+    surface_wifi_present && break
+    sleep 1
+done
 
 if ! surface_wifi_present; then
     echo "surface-wifi: WCN7850 did not create a wireless interface" >&2
@@ -588,6 +578,9 @@ verify_proxmox_installer_squashfs() {
 	[[ -n "$NETWORK_MANAGER_PACKAGE_DIR" || -n "$FIRMWARE_SOURCE" ]] || return 0
 	listing=$(mktemp "$WORK_DIR/installer-squash-list.XXXXXX")
 	unsquashfs -no-progress -ll "$squashfs" >"$listing"
+	if grep -Eq '^d.* squashfs-root/(lib|bin|sbin)$' "$listing"; then
+		die "installer SquashFS hides a base usrmerge symlink with a directory"
+	fi
 	if [[ -n "$NETWORK_MANAGER_PACKAGE_DIR" ]]; then
 		for required in \
 			usr/bin/nmcli \
@@ -606,12 +599,12 @@ verify_proxmox_installer_squashfs() {
 	if [[ -n "$FIRMWARE_SOURCE" ]]; then
 		while IFS= read -r -d '' firmware; do
 			relative=${firmware#"$FIRMWARE_SOURCE"/}
-			grep -Eq "squashfs-root/lib/firmware/$relative$" "$listing" || {
+			grep -Eq "squashfs-root/usr/lib/firmware/$relative$" "$listing" || {
 				rm -f -- "$listing"
 				die "installer squashfs is missing Surface firmware: $relative"
 			}
 			expected=$(sha256sum "$firmware" | cut -d ' ' -f1)
-			actual=$(unsquashfs -cat "$squashfs" "lib/firmware/$relative" |
+			actual=$(unsquashfs -cat "$squashfs" "usr/lib/firmware/$relative" |
 				sha256sum | cut -d ' ' -f1)
 			[[ "$actual" == "$expected" ]] || {
 				rm -f -- "$listing"
@@ -622,14 +615,14 @@ verify_proxmox_installer_squashfs() {
 	[[ -n "$NETWORK_MANAGER_PACKAGE_DIR" ]] || { rm -f -- "$listing"; return 0; }
 	if [[ -n "$WCN7850_FIRMWARE_SOURCE" ]]; then
 		for required in amss.bin m3.bin board-2.bin; do
-			grep -Eq "squashfs-root/lib/firmware/ath12k/WCN7850/hw2.0/$required$" \
+			grep -Eq "squashfs-root/usr/lib/firmware/ath12k/WCN7850/hw2.0/$required$" \
 				"$listing" || {
 				rm -f -- "$listing"
 				die "installer squashfs is missing WCN7850 firmware: $required"
 			}
 			expected=$(sha256sum "$WCN7850_FIRMWARE_SOURCE/$required" | awk '{print $1}')
 			actual=$(unsquashfs -cat "$squashfs" \
-				"lib/firmware/ath12k/WCN7850/hw2.0/$required" | sha256sum | awk '{print $1}')
+				"usr/lib/firmware/ath12k/WCN7850/hw2.0/$required" | sha256sum | awk '{print $1}')
 			[[ "$actual" == "$expected" ]] || {
 				rm -f -- "$listing"
 				die "installer squashfs WCN7850 firmware hash mismatch: $required"
@@ -646,10 +639,10 @@ verify_proxmox_installer_squashfs() {
 		rm -f -- "$listing"
 		die "live installer Wi-Fi helper does not start NetworkManager directly"
 	}
-	grep -Fq '/sys/bus/pci/drivers_probe' <<<"$helper_text" || {
+	if grep -Eq '/unbind|/drivers_probe' <<<"$helper_text"; then
 		rm -f -- "$listing"
-		die "live installer Wi-Fi helper cannot reprobe WCN7850"
-	}
+		die "live installer must not forcibly rebind the built-in Wi-Fi driver"
+	fi
 	rm -f -- "$listing"
 }
 

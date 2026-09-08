@@ -29,8 +29,9 @@ nmcli device wifi list ifname wlan0
 nmcli device wifi connect 'SSID' password 'PASSWORD' ifname wlan0
 ```
 
-`/usr/local/sbin/surface-wifi-start` can be run again if the PCI device needs
-to be reprobed after a firmware or device initialization failure.
+`/usr/local/sbin/surface-wifi-start` waits for the wireless interface and starts
+NetworkManager. It does not forcibly detach the built-in PCI driver. If the
+interface is absent, inspect the kernel log and firmware before retrying.
 
 The ISO builder takes the ARM64 Debian packages from an external directory so
 binary packages are not committed to this repository:
