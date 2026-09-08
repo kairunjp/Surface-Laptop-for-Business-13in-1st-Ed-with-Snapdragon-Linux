@@ -130,6 +130,14 @@ The DSP files are copied into both the installer initramfs and live SquashFS
 and checked by SHA-256.  The LVM module tree is matched against the exact
 kernel Image; a same-named release from another kernel build is rejected.
 
+The live installer runs under a static BusyBox PID 1 supervisor so a failed
+installer process leaves a recovery shell and its exit status instead of a
+kernel panic. Extract `busybox-static:arm64` and set `INSTALLER_BUSYBOX` to its
+`bin/busybox` when building (default:
+`build/installer-busybox/root/bin/busybox`). The builder rejects a dynamic or
+non-ARM64 binary. This contains installer exits; it does not cure a hardware
+reset or a kernel fault independent of PID 1.
+
 `--qebspil`/`--qebspil-source` can package the optional Qualcomm DSP pre-boot
 loader. The EFI builder's `--firmware-tree` option copies an additional
 firmware tree into that EFI image. It is not started by default: use

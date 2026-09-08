@@ -29,6 +29,11 @@ OVERLAY = OVERLAY_MARKER + '''    echo "installing Surface EFI variable fallback
        ! cp /surface-installer/SurfaceEFI.pm "$surface_perl_dir/Install/SurfaceEFI.pm"; then
         debugsh_err_reboot "unable to install Surface EFI variable fallback"
     fi
+    echo "installing Surface installer PID 1 supervisor"
+    mkdir -p /mnt/.installer-mp/surface-installer
+    cp /surface-installer/busybox /mnt/.installer-mp/surface-installer/busybox || debugsh_err_reboot "cannot install static BusyBox"
+    cp /surface-installer/init /mnt/.installer-mp/surface-installer/init || debugsh_err_reboot "cannot install PID 1 supervisor"
+    chmod 0755 /mnt/.installer-mp/surface-installer/busybox /mnt/.installer-mp/surface-installer/init
     echo "installing Surface installer power controls"
     for surface_power_command in poweroff reboot halt; do
         rm -f "/mnt/.installer-mp/sbin/$surface_power_command"
@@ -77,8 +82,13 @@ def patch_init(text: str) -> str:
     if OVERLAY_MARKER in text:
         start = text.index(OVERLAY_MARKER)
         end = text.index(OVERLAY_END, start) + len(OVERLAY_END)
+        if text[end:end + 1] == "\n":
+            end += 1
         text = text[:start] + text[end:]
     anchor = '    if [ -x "/mnt/.installer-mp/sbin/unconfigured.sh" ]; then\n'
+    old = '/bin/setsid /bin/sh -c "exec /sbin/unconfigured.sh </dev/$console >/dev/$console 2>&1"'
+    new = '/surface-installer/busybox sh /surface-installer/init'
+    text = replace_once(text, old, new)
     return replace_once(text, anchor, OVERLAY + "\n" + anchor)
 
 

@@ -12,6 +12,7 @@ DTB_FILE=${DTB_FILE:-$WORK_DIR/dtb/surface-laptop-13-current.dtb}
 DTB_NAME=${DTB_NAME:-surface-laptop-13-current.dtb}
 INITRD_FILE=${INITRD_FILE:-}
 LVM_MODULE_TREE=${LVM_MODULE_TREE:-}
+INSTALLER_BUSYBOX=${INSTALLER_BUSYBOX:-$ROOT_DIR/build/installer-busybox/root/bin/busybox}
 # Optional firmware tree for the Surface DSP/remoteproc devices.  The normal
 # DTB probes ADSP/CDSP during installer startup; without these files Linux
 # repeatedly retries the firmware request and can hit an SMMU fault before the
@@ -698,6 +699,21 @@ patch_proxmox_initrd_lvm() {
 		"$ROOT_DIR/initramfs/installer/SurfaceEFI.pm" >>"$manifest"
 	printf 'surface-installer/powerctl %s 0755\n' \
 		"$ROOT_DIR/initramfs/scripts/surface-installer-powerctl.sh" >>"$manifest"
+	printf 'surface-installer/init %s 0755\n' \
+		"$ROOT_DIR/initramfs/scripts/surface-installer-init.sh" >>"$manifest"
+	file "$INSTALLER_BUSYBOX" | grep -Eq 'ARM aarch64.*statically linked' ||
+		die "INSTALLER_BUSYBOX must point to an ARM64 static BusyBox (extract busybox-static:arm64)"
+	printf 'surface-installer/busybox %s 0755\n' "$INSTALLER_BUSYBOX" >>"$manifest"
+	# The input ISO may carry an older startup overlay which otherwise hides
+	# the NetworkManager changes made to the live SquashFS.
+	local startup
+	startup=$(mktemp "$WORK_DIR/surface-startup.XXXXXX")
+	cpio -i --to-stdout surface-unconfigured.sh 2>/dev/null <"$raw_initrd" >"$startup"
+	if [[ -s "$startup" && -n "$NETWORK_MANAGER_PACKAGE_DIR" ]]; then
+		python3 "$ROOT_DIR/initramfs/scripts/patch-proxmox-live-wifi.py" "$startup"
+		bash -n "$startup"
+		printf 'surface-unconfigured.sh %s 0755\n' "$startup" >>"$manifest"
+	fi
 	if [[ -n "$FIRMWARE_SOURCE" ]]; then
 		while IFS= read -r -d '' firmware; do
 			relative=${firmware#"$FIRMWARE_SOURCE"/}
@@ -733,7 +749,7 @@ patch_proxmox_initrd_lvm() {
 	zstd -q -T0 -19 -f "$patched" -o "$compressed"
 	mv -- "$compressed" "$initrd"
 	zstd -q -dc "$initrd" | cpio -it --quiet >/dev/null
-	rm -f -- "$raw_initrd" "$init_file" "$manifest" "$patched" "$installer_module"
+	rm -f -- "$raw_initrd" "$init_file" "$manifest" "$patched" "$installer_module" "$startup"
 }
 
 verify_proxmox_installer_initrd() {
@@ -749,9 +765,11 @@ verify_proxmox_installer_initrd() {
 		die "initrd is not a Proxmox installer initrd (.cd-info is missing): $initrd"
 	}
 	init_text=$(zstd -q -dc "$initrd" | cpio -i --to-stdout init 2>/dev/null || true)
-	for required in surface-installer/Install.pm surface-installer/SurfaceEFI.pm surface-installer/powerctl; do
+	for required in surface-installer/Install.pm surface-installer/SurfaceEFI.pm surface-installer/powerctl surface-installer/init surface-installer/busybox; do
 		grep -Fxq "$required" "$listing" || die "installer EFI fallback payload is missing: $required"
 	done
+	grep -Fq '/surface-installer/busybox sh /surface-installer/init' <<<"$init_text" ||
+		die "installer handoff does not preserve the PID 1 supervisor"
 	grep -Fq 'cp /surface-installer/Install.pm "$surface_perl_dir/Install.pm"' <<<"$init_text" ||
 		die "installer init does not activate the Surface EFI fallback"
 	if ! grep -Fq 'Proxmox Server Solutions' <<<"$init_text"; then
