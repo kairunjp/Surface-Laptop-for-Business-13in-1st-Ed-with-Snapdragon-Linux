@@ -16,6 +16,13 @@ LVM_BLOCK = r'''# The installer switches from this initramfs to the stock Proxmo
 load_surface_dm_module() {
     module_name=$1
 
+    # A distribution may build part of device-mapper into the kernel.  BusyBox
+    # modprobe returns failure for a built-in symbol even though the subsystem
+    # is already usable, so check sysfs before trying to load a .ko file.
+    if [ -d "/sys/module/$module_name" ]; then
+        return 0
+    fi
+
     if grep -qw "$module_name" /proc/modules; then
         return 0
     fi

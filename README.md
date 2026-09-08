@@ -118,9 +118,22 @@ GRUB_MODULE_DIR=/usr/lib/grub/arm64-efi \
   --efi-image build/surface-kvm-efi.img
 ```
 
+For the normal installer DTB, pass the Surface DSP firmware tree as well:
+
+```sh
+./build-proxmox-iso.sh \
+  --firmware-tree build/firmware-tree \
+  --lvm-module-tree build/.work/modules/lib/modules/7.2.0-rc5-surface-laptop-13
+```
+
+The DSP files are copied into both the installer initramfs and live SquashFS
+and checked by SHA-256.  The LVM module tree is matched against the exact
+kernel Image; a same-named release from another kernel build is rejected.
+
 `--qebspil`/`--qebspil-source` can package the optional Qualcomm DSP pre-boot
-loader, and `--firmware-tree` copies an additional firmware tree into the EFI
-image. It is not started by default: use `--load-qebspil` only after validating
+loader. The EFI builder's `--firmware-tree` option copies an additional
+firmware tree into that EFI image. It is not started by default: use
+`--load-qebspil` only after validating
 the basic EL2 path on the target device. The normal EL1 DTB remains separate so non-KVM boots and hardware
 variants can continue to use their own menu entries. The ISO KVM entries
 chainload a Secure Launch bridge on the El Torito FAT volume, then boot the

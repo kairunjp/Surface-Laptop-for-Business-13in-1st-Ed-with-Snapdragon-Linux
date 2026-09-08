@@ -12,6 +12,12 @@ DTB_FILE=${DTB_FILE:-$WORK_DIR/dtb/surface-laptop-13-current.dtb}
 DTB_NAME=${DTB_NAME:-surface-laptop-13-current.dtb}
 INITRD_FILE=${INITRD_FILE:-}
 LVM_MODULE_TREE=${LVM_MODULE_TREE:-}
+# Optional firmware tree for the Surface DSP/remoteproc devices.  The normal
+# DTB probes ADSP/CDSP during installer startup; without these files Linux
+# repeatedly retries the firmware request and can hit an SMMU fault before the
+# installer reaches its UI.  Keep the input external to Git, just like the
+# Wi-Fi firmware.
+FIRMWARE_SOURCE=${FIRMWARE_SOURCE:-}
 WCN7850_FIRMWARE_SOURCE=${WCN7850_FIRMWARE_SOURCE:-}
 # Optional ARM64 Debian package bundle for NetworkManager and the Wi-Fi CLI.
 # The binary packages are deliberately kept outside Git; pass a directory
@@ -98,6 +104,8 @@ Options:
   --initrd FILE       Replace the ISO initrd with this archive.
   --lvm-module-tree DIR
                       Replace the LVM modules with files built with --kernel-image.
+  --firmware-tree DIR Add the Surface DSP/remoteproc firmware tree to the
+                      installer initramfs and live SquashFS.
   --wcn7850-firmware DIR
                       Add ath12k/WCN7850 Wi-Fi firmware to the ISO initrd.
   --network-manager-packages DIR
@@ -193,6 +201,11 @@ parse_args() {
 				(($#)) || die "--lvm-module-tree needs a directory"
 				LVM_MODULE_TREE=$1
 				;;
+			--firmware-tree)
+				shift
+				(($#)) || die "--firmware-tree needs a directory"
+				FIRMWARE_SOURCE=$1
+				;;
 			--wcn7850-firmware)
 				shift
 				(($#)) || die "--wcn7850-firmware needs a directory"
@@ -236,6 +249,62 @@ cleanup() {
 	if [[ -n "$STAGE_DIR" && -d "$STAGE_DIR" ]]; then
 		rm -rf -- "$STAGE_DIR"
 	fi
+}
+
+resolve_lvm_module_tree() {
+	local release candidate expected actual image_config tree_config
+	[[ "$INCLUDE_MODULES" -eq 1 ]] || return 0
+	need sha256sum
+	if [[ -z "$LVM_MODULE_TREE" ]]; then
+		# build-debian.sh writes the kernel and its modules below the same
+		# WORK_DIR. Select that release directory automatically so a default
+		# ISO build cannot silently fall back to a stale module tree.
+		if [[ -f "$WORK_DIR/kernel/release" ]]; then
+			release=$(tr -d '\n' <"$WORK_DIR/kernel/release")
+			candidate="$WORK_DIR/modules/lib/modules/$release"
+			[[ -d "$candidate" ]] ||
+				die "matching Surface module tree is missing: $candidate (rebuild kernel and modules together)"
+			LVM_MODULE_TREE="$candidate"
+		else
+			die "LVM_MODULE_TREE is required when using an existing kernel image; pass the module tree built with that exact Image"
+		fi
+	fi
+	[[ -d "$LVM_MODULE_TREE" ]] || die "LVM module tree not found: $LVM_MODULE_TREE"
+	[[ "$(basename "$LVM_MODULE_TREE")" == *surface-laptop-13* ]] ||
+		die "LVM module tree release is not for Surface Laptop 13: $LVM_MODULE_TREE"
+	release=$(basename "$LVM_MODULE_TREE")
+	# Prefer an adjacent build image or packaged /boot image and compare it
+	# byte-for-byte. Same release/vermagic is insufficient when exported
+	# symbols came from another kernel build.
+	# Prefer an image packaged beside the module tree.  WORK_DIR may contain a
+	# stale image from an interrupted build, and that unrelated file must not
+	# mask a matching /boot image from the explicit module package.
+	for candidate in \
+		"$LVM_MODULE_TREE/../../../boot/vmlinuz-$release" \
+		"$LVM_MODULE_TREE/../../../../kernel/Image" \
+		"$WORK_DIR/kernel/Image"; do
+		if [[ -f "$candidate" ]]; then
+			[[ -f "$KERNEL_IMAGE" ]] || die "kernel image is missing: $KERNEL_IMAGE"
+			expected=$(sha256sum "$KERNEL_IMAGE" | cut -d ' ' -f1)
+			actual=$(sha256sum "$candidate" | cut -d ' ' -f1)
+			[[ "$expected" == "$actual" ]] ||
+				die "kernel/module mismatch: $candidate is not the exact Image supplied as $KERNEL_IMAGE"
+			printf 'Surface module tree: exact kernel Image match (%s)\n' "$release"
+			return 0
+		fi
+	done
+	# A standalone module tree is accepted only when it carries the same
+	# generated config as the supplied kernel artifact. This keeps old package
+	# layouts usable while rejecting the common stale-tree case.
+	image_config="$(dirname "$KERNEL_IMAGE")/config-$release"
+	tree_config="$LVM_MODULE_TREE/../../../boot/config-$release"
+	if [[ -f "$image_config" && -f "$tree_config" ]]; then
+		cmp -s "$image_config" "$tree_config" ||
+			die "kernel/module mismatch: generated configs differ for $release"
+		printf 'Surface module tree: generated config matches (%s); no adjacent Image to hash\n' "$release"
+		return 0
+	fi
+	die "cannot prove that LVM modules match $KERNEL_IMAGE; supply a module tree from the same kernel build (with its Image or config-$release)"
 }
 
 trap cleanup EXIT
@@ -388,22 +457,36 @@ add_network_manager_packages() {
 
 augment_proxmox_installer_squashfs() {
 	local squashfs="$STAGE_DIR/pve-installer.squashfs"
-	local root_dir output_dir package wifi_firmware_dir
-	[[ -n "$NETWORK_MANAGER_PACKAGE_DIR" ]] || return 0
+	local root_dir output_dir package wifi_firmware_dir firmware relative
+	[[ -n "$NETWORK_MANAGER_PACKAGE_DIR" || -n "$FIRMWARE_SOURCE" ]] || return 0
 	[[ -f "$squashfs" ]] || die "Proxmox installer squashfs not found: $squashfs"
 
 	root_dir=$(mktemp -d "$WORK_DIR/pve-installer-wifi.XXXXXX")
 	output_dir=$(mktemp "$WORK_DIR/pve-installer-squashfs.XXXXXX")
 	rm -f -- "$output_dir"
-	log "Adding nmcli and NetworkManager to the installer live environment"
+	log "Adding Surface firmware and optional NetworkManager to the installer live environment"
 	unsquashfs -no-xattrs -d "$root_dir" "$squashfs" >/dev/null
-	for package in "${NETWORK_MANAGER_PACKAGE_FILES[@]}"; do
-		dpkg-deb -x "$package" "$root_dir"
-	done
+	if [[ -n "$NETWORK_MANAGER_PACKAGE_DIR" ]]; then
+		for package in "${NETWORK_MANAGER_PACKAGE_FILES[@]}"; do
+			dpkg-deb -x "$package" "$root_dir"
+		done
+	fi
+	if [[ -n "$FIRMWARE_SOURCE" ]]; then
+		mkdir -p "$root_dir/lib/firmware"
+		cp -a "$FIRMWARE_SOURCE"/. "$root_dir/lib/firmware"/
+	fi
 	if [[ -n "$WCN7850_FIRMWARE_SOURCE" ]]; then
 		wifi_firmware_dir="$root_dir/lib/firmware/ath12k/WCN7850/hw2.0"
 		mkdir -p "$wifi_firmware_dir"
 		cp -a "$WCN7850_FIRMWARE_SOURCE"/. "$wifi_firmware_dir"/
+	fi
+
+	if [[ -z "$NETWORK_MANAGER_PACKAGE_DIR" ]]; then
+		mksquashfs "$root_dir" "$output_dir" -comp zstd -Xcompression-level 19 \
+			-b 1048576 -no-xattrs -noappend >/dev/null
+		mv -- "$output_dir" "$squashfs"
+		rm -rf -- "$root_dir"
+		return 0
 	fi
 
 	# The live installer is SysV based rather than systemd based.  Start
@@ -500,23 +583,42 @@ EOF
 
 verify_proxmox_installer_squashfs() {
 	local listing required squashfs="$STAGE_DIR/pve-installer.squashfs"
-	local unconfigured_text helper_text expected actual
-	[[ -n "$NETWORK_MANAGER_PACKAGE_DIR" ]] || return 0
+	local unconfigured_text helper_text expected actual firmware relative
+	[[ -n "$NETWORK_MANAGER_PACKAGE_DIR" || -n "$FIRMWARE_SOURCE" ]] || return 0
 	listing=$(mktemp "$WORK_DIR/installer-squash-list.XXXXXX")
 	unsquashfs -no-progress -ll "$squashfs" >"$listing"
-	for required in \
-		usr/bin/nmcli \
-		usr/sbin/NetworkManager \
-		usr/sbin/wpa_supplicant \
-		usr/sbin/iw \
-		usr/sbin/rfkill \
-		usr/local/sbin/surface-wifi-start \
-		etc/NetworkManager/conf.d/10-surface-wifi.conf; do
-		grep -Eq "squashfs-root/$required$" "$listing" || {
-			rm -f -- "$listing"
-			die "installer squashfs is missing NetworkManager Wi-Fi file: $required"
-		}
-	done
+	if [[ -n "$NETWORK_MANAGER_PACKAGE_DIR" ]]; then
+		for required in \
+			usr/bin/nmcli \
+			usr/sbin/NetworkManager \
+			usr/sbin/wpa_supplicant \
+			usr/sbin/iw \
+			usr/sbin/rfkill \
+			usr/local/sbin/surface-wifi-start \
+			etc/NetworkManager/conf.d/10-surface-wifi.conf; do
+			grep -Eq "squashfs-root/$required$" "$listing" || {
+				rm -f -- "$listing"
+				die "installer squashfs is missing NetworkManager Wi-Fi file: $required"
+			}
+		done
+	fi
+	if [[ -n "$FIRMWARE_SOURCE" ]]; then
+		while IFS= read -r -d '' firmware; do
+			relative=${firmware#"$FIRMWARE_SOURCE"/}
+			grep -Eq "squashfs-root/lib/firmware/$relative$" "$listing" || {
+				rm -f -- "$listing"
+				die "installer squashfs is missing Surface firmware: $relative"
+			}
+			expected=$(sha256sum "$firmware" | cut -d ' ' -f1)
+			actual=$(unsquashfs -cat "$squashfs" "lib/firmware/$relative" |
+				sha256sum | cut -d ' ' -f1)
+			[[ "$actual" == "$expected" ]] || {
+				rm -f -- "$listing"
+				die "installer squashfs Surface firmware hash mismatch: $relative"
+			}
+		done < <(find "$FIRMWARE_SOURCE" -type f -print0 | sort -z)
+	fi
+	[[ -n "$NETWORK_MANAGER_PACKAGE_DIR" ]] || { rm -f -- "$listing"; return 0; }
 	if [[ -n "$WCN7850_FIRMWARE_SOURCE" ]]; then
 		for required in amss.bin m3.bin board-2.bin; do
 			grep -Eq "squashfs-root/lib/firmware/ath12k/WCN7850/hw2.0/$required$" \
@@ -596,6 +698,12 @@ patch_proxmox_initrd_lvm() {
 		"$ROOT_DIR/initramfs/installer/SurfaceEFI.pm" >>"$manifest"
 	printf 'surface-installer/powerctl %s 0755\n' \
 		"$ROOT_DIR/initramfs/scripts/surface-installer-powerctl.sh" >>"$manifest"
+	if [[ -n "$FIRMWARE_SOURCE" ]]; then
+		while IFS= read -r -d '' firmware; do
+			relative=${firmware#"$FIRMWARE_SOURCE"/}
+			printf 'lib/firmware/%s %s 0644\n' "$relative" "$firmware" >>"$manifest"
+		done < <(find "$FIRMWARE_SOURCE" -type f -print0 | sort -z)
+	fi
 	if [[ -n "$LVM_MODULE_TREE" ]]; then
 		release=$(basename "$LVM_MODULE_TREE")
 		for relative in \
@@ -629,7 +737,7 @@ patch_proxmox_initrd_lvm() {
 }
 
 verify_proxmox_installer_initrd() {
-	local initrd=$1 listing init_text installer_text required release relative expected actual extract_dir
+	local initrd=$1 listing init_text installer_text required release relative expected actual extract_dir firmware
 	[[ -s "$initrd" ]] || die "installer initrd is missing or empty: $initrd"
 	listing=$(mktemp "$WORK_DIR/initrd-list.XXXXXX")
 	if ! zstd -q -dc "$initrd" | cpio -it --quiet >"$listing" 2>/dev/null; then
@@ -777,7 +885,19 @@ verify_proxmox_installer_initrd() {
 				rm -f -- "$listing"
 				die "initrd early-boot module does not match selected kernel module tree: $relative"
 			}
-		done
+			done
+	fi
+	if [[ -n "$FIRMWARE_SOURCE" ]]; then
+		while IFS= read -r -d '' firmware; do
+			relative=${firmware#"$FIRMWARE_SOURCE"/}
+			expected=$(sha256sum "$firmware" | cut -d ' ' -f1)
+			actual=$(zstd -q -dc "$initrd" | cpio -i --to-stdout \
+				"lib/firmware/$relative" 2>/dev/null | sha256sum | cut -d ' ' -f1)
+			[[ "$actual" == "$expected" ]] || {
+				rm -f -- "$listing"
+				die "initrd Surface firmware does not match selected firmware tree: $relative"
+			}
+			done < <(find "$FIRMWARE_SOURCE" -type f -print0 | sort -z)
 	fi
 	rm -f -- "$listing"
 	printf 'Installer initrd: Proxmox ISO init and Surface LVM stack detected (%s)\n' "$initrd"
@@ -1445,11 +1565,19 @@ augment_initrd_with_modules() {
 	local module_base="$WORK_DIR/modules/lib/modules"
 	local module_dir release
 	local base_initrd augmented manifest compressed
-	shopt -s nullglob
-	local module_dirs=("$module_base"/*)
-	shopt -u nullglob
-	(( ${#module_dirs[@]} == 1 )) || die "expected one built module release below $module_base"
-	module_dir=${module_dirs[0]}
+	if [[ -n "$LVM_MODULE_TREE" ]]; then
+		# An explicit module tree is paired with --kernel-image by
+		# resolve_lvm_module_tree.  Use that exact tree for the complete initrd
+		# augmentation as well; falling back to WORK_DIR/modules here could
+		# silently reintroduce a stale tree after a packaged-kernel build.
+		module_dir=$LVM_MODULE_TREE
+	else
+		shopt -s nullglob
+		local module_dirs=("$module_base"/*)
+		shopt -u nullglob
+		(( ${#module_dirs[@]} == 1 )) || die "expected one built module release below $module_base"
+		module_dir=${module_dirs[0]}
+	fi
 	release=$(basename "$module_dir")
 
 	base_initrd=$(mktemp "$WORK_DIR/proxmox-initrd-base.XXXXXX.img")
@@ -1624,9 +1752,11 @@ main() {
 	need file
 	need blkid
 	need mcopy
+	if [[ -n "$NETWORK_MANAGER_PACKAGE_DIR" || -n "$FIRMWARE_SOURCE" ]]; then
+		need mksquashfs
+	fi
 	if [[ -n "$NETWORK_MANAGER_PACKAGE_DIR" ]]; then
 		need dpkg-deb
-		need mksquashfs
 	fi
 	if [[ "$FAT_BOOT" -eq 1 ]]; then
 		need mformat
@@ -1673,6 +1803,9 @@ main() {
 	if [[ -n "$LVM_MODULE_TREE" ]]; then
 		LVM_MODULE_TREE=$(absolute_path "$LVM_MODULE_TREE")
 	fi
+	if [[ -n "$FIRMWARE_SOURCE" ]]; then
+		FIRMWARE_SOURCE=$(absolute_path "$FIRMWARE_SOURCE")
+	fi
 	if [[ -n "$WCN7850_FIRMWARE_SOURCE" ]]; then
 		WCN7850_FIRMWARE_SOURCE=$(absolute_path "$WCN7850_FIRMWARE_SOURCE")
 	fi
@@ -1683,6 +1816,11 @@ main() {
 		[[ -d "$LVM_MODULE_TREE" ]] || die "LVM module tree not found: $LVM_MODULE_TREE"
 		[[ "$(basename "$LVM_MODULE_TREE")" == *surface-laptop-13* ]] ||
 			die "LVM module tree release is not for Surface Laptop 13: $LVM_MODULE_TREE"
+	fi
+	if [[ -n "$FIRMWARE_SOURCE" ]]; then
+		[[ -d "$FIRMWARE_SOURCE" ]] || die "Surface firmware tree not found: $FIRMWARE_SOURCE"
+		find "$FIRMWARE_SOURCE" -type f -print -quit | grep -q . ||
+			die "Surface firmware tree is empty: $FIRMWARE_SOURCE"
 	fi
 	if [[ -n "$EFI_IMAGE" ]]; then
 		EFI_IMAGE=$(absolute_path "$EFI_IMAGE")
@@ -1739,6 +1877,7 @@ main() {
 	mkdir -p "$OUTPUT_DIR" "$WORK_DIR"
 	build_missing_components
 	[[ -f "$KERNEL_IMAGE" ]] || die "kernel image not found after build: $KERNEL_IMAGE"
+	resolve_lvm_module_tree
 	[[ -f "$DTB_FILE" ]] || die "DTB not found after build: $DTB_FILE"
 	file "$KERNEL_IMAGE" | grep -Eiq 'ARM|aarch64' || die "kernel does not look like an ARM64 image: $KERNEL_IMAGE"
 
