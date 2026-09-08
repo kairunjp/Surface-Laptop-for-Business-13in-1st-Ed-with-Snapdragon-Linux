@@ -20,15 +20,17 @@ The password is stored in NetworkManager's connection profile. Use
 `nmcli connection show` to list profiles and `nmcli connection delete ID` to
 remove one. Do not put credentials in the kernel command line or in the ISO.
 
-The live installer includes the same tools. From its shell, start the live
-service and then use `nmcli`:
+The live installer includes the same tools and starts NetworkManager after
+udev and D-Bus are ready. From its shell, use `nmcli` directly:
 
 ```sh
-/usr/local/sbin/surface-wifi-start
 nmcli device status
 nmcli device wifi list ifname wlan0
 nmcli device wifi connect 'SSID' password 'PASSWORD' ifname wlan0
 ```
+
+`/usr/local/sbin/surface-wifi-start` can be run again if the PCI device needs
+to be reprobed after a firmware or device initialization failure.
 
 The ISO builder takes the ARM64 Debian packages from an external directory so
 binary packages are not committed to this repository:

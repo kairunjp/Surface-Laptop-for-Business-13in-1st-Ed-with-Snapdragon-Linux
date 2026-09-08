@@ -388,7 +388,7 @@ add_network_manager_packages() {
 
 augment_proxmox_installer_squashfs() {
 	local squashfs="$STAGE_DIR/pve-installer.squashfs"
-	local root_dir output_dir package
+	local root_dir output_dir package wifi_firmware_dir
 	[[ -n "$NETWORK_MANAGER_PACKAGE_DIR" ]] || return 0
 	[[ -f "$squashfs" ]] || die "Proxmox installer squashfs not found: $squashfs"
 
@@ -400,6 +400,11 @@ augment_proxmox_installer_squashfs() {
 	for package in "${NETWORK_MANAGER_PACKAGE_FILES[@]}"; do
 		dpkg-deb -x "$package" "$root_dir"
 	done
+	if [[ -n "$WCN7850_FIRMWARE_SOURCE" ]]; then
+		wifi_firmware_dir="$root_dir/lib/firmware/ath12k/WCN7850/hw2.0"
+		mkdir -p "$wifi_firmware_dir"
+		cp -a "$WCN7850_FIRMWARE_SOURCE"/. "$wifi_firmware_dir"/
+	fi
 
 	# The live installer is SysV based rather than systemd based.  Start
 	# NetworkManager after D-Bus and keep ifupdown-managed bridges untouched;
@@ -421,30 +426,72 @@ managed=true
 EOF
 	cat >"$root_dir/usr/local/sbin/surface-wifi-start" <<'EOF'
 #!/bin/sh
-# Start the live installer's Wi-Fi control path.  The installer does not use
-# systemd, so NetworkManager is not started by a systemd unit here.
+# Reprobe WCN7850 after the installer SquashFS is mounted, then start the live
+# installer's NetworkManager without relying on systemd or a SysV init script.
 set -u
 
-if [ ! -s /run/dbus/pid ] && [ -x /etc/init.d/dbus ]; then
-    /etc/init.d/dbus start >/tmp/surface-dbus.log 2>&1 || true
+surface_wifi_present() {
+    for iface in /sys/class/net/*; do
+        [ -d "$iface/wireless" ] && return 0
+    done
+    return 1
+}
+
+if ! surface_wifi_present; then
+    for pci_device in /sys/bus/pci/devices/*; do
+        [ -r "$pci_device/vendor" ] || continue
+        [ -r "$pci_device/device" ] || continue
+        [ "$(cat "$pci_device/vendor")" = "0x17cb" ] || continue
+        [ "$(cat "$pci_device/device")" = "0x1107" ] || continue
+
+        pci_address=${pci_device##*/}
+        echo "surface-wifi: reprobe WCN7850 at $pci_address" >&2
+        if [ -L "$pci_device/driver" ]; then
+            pci_driver=$(readlink -f "$pci_device/driver")
+            echo "$pci_address" >"$pci_driver/unbind" || true
+            sleep 1
+            echo "$pci_address" >"$pci_driver/bind" || true
+        else
+            echo "$pci_address" >/sys/bus/pci/drivers_probe || true
+        fi
+    done
+    command -v udevadm >/dev/null 2>&1 && udevadm settle || true
+    sleep 2
 fi
-if ! pidof NetworkManager >/dev/null 2>&1; then
-    if [ -x /etc/init.d/network-manager ]; then
-        /etc/init.d/network-manager start >/tmp/surface-network-manager.log 2>&1 || true
+
+if ! surface_wifi_present; then
+    echo "surface-wifi: WCN7850 did not create a wireless interface" >&2
+    exit 1
+fi
+
+if ! pidof dbus-daemon >/dev/null 2>&1; then
+    if [ -x /etc/init.d/dbus ]; then
+        /etc/init.d/dbus start >/tmp/surface-dbus.log 2>&1 || true
+    else
+        mkdir -p /run/dbus
+        dbus-daemon --system --fork >/tmp/surface-dbus.log 2>&1 || true
     fi
 fi
-sleep 1
 if ! pidof NetworkManager >/dev/null 2>&1; then
+    /usr/sbin/NetworkManager --no-daemon \
+        >/tmp/surface-network-manager.log 2>&1 &
+fi
+for wait_try in 1 2 3 4 5; do
+    nmcli general status >/dev/null 2>&1 && break
+    sleep 1
+done
+if ! nmcli general status >/dev/null 2>&1; then
     echo "surface-wifi: NetworkManager did not start; see /tmp/surface-network-manager.log" >&2
     exit 1
 fi
-echo "surface-wifi: wlan0 is ready; use nmcli device wifi list/connect" >&2
+nmcli radio wifi on >/dev/null 2>&1 || true
+echo "surface-wifi: Wi-Fi is ready; use nmcli device wifi list/connect" >&2
 EOF
 	chmod 0755 "$root_dir/usr/local/sbin/surface-wifi-start"
-	for runlevel in 2 3 4 5; do
-		mkdir -p "$root_dir/etc/rc$runlevel.d"
-		ln -sfn ../init.d/network-manager "$root_dir/etc/rc$runlevel.d/S02network-manager"
-	done
+	sh -n "$root_dir/usr/local/sbin/surface-wifi-start"
+	python3 "$ROOT_DIR/initramfs/scripts/patch-proxmox-live-wifi.py" \
+		"$root_dir/usr/sbin/unconfigured.sh"
+	bash -n "$root_dir/usr/sbin/unconfigured.sh"
 	mksquashfs "$root_dir" "$output_dir" -comp zstd -Xcompression-level 19 \
 		-b 1048576 -no-xattrs -noappend >/dev/null
 	mv -- "$output_dir" "$squashfs"
@@ -453,6 +500,7 @@ EOF
 
 verify_proxmox_installer_squashfs() {
 	local listing required squashfs="$STAGE_DIR/pve-installer.squashfs"
+	local unconfigured_text helper_text expected actual
 	[[ -n "$NETWORK_MANAGER_PACKAGE_DIR" ]] || return 0
 	listing=$(mktemp "$WORK_DIR/installer-squash-list.XXXXXX")
 	unsquashfs -no-progress -ll "$squashfs" >"$listing"
@@ -469,6 +517,36 @@ verify_proxmox_installer_squashfs() {
 			die "installer squashfs is missing NetworkManager Wi-Fi file: $required"
 		}
 	done
+	if [[ -n "$WCN7850_FIRMWARE_SOURCE" ]]; then
+		for required in amss.bin m3.bin board-2.bin; do
+			grep -Eq "squashfs-root/lib/firmware/ath12k/WCN7850/hw2.0/$required$" \
+				"$listing" || {
+				rm -f -- "$listing"
+				die "installer squashfs is missing WCN7850 firmware: $required"
+			}
+			expected=$(sha256sum "$WCN7850_FIRMWARE_SOURCE/$required" | awk '{print $1}')
+			actual=$(unsquashfs -cat "$squashfs" \
+				"lib/firmware/ath12k/WCN7850/hw2.0/$required" | sha256sum | awk '{print $1}')
+			[[ "$actual" == "$expected" ]] || {
+				rm -f -- "$listing"
+				die "installer squashfs WCN7850 firmware hash mismatch: $required"
+			}
+		done
+	fi
+	unconfigured_text=$(unsquashfs -cat "$squashfs" usr/sbin/unconfigured.sh)
+	grep -Fq '/usr/local/sbin/surface-wifi-start' <<<"$unconfigured_text" || {
+		rm -f -- "$listing"
+		die "live installer does not start the Surface Wi-Fi service"
+	}
+	helper_text=$(unsquashfs -cat "$squashfs" usr/local/sbin/surface-wifi-start)
+	grep -Fq '/usr/sbin/NetworkManager --no-daemon' <<<"$helper_text" || {
+		rm -f -- "$listing"
+		die "live installer Wi-Fi helper does not start NetworkManager directly"
+	}
+	grep -Fq '/sys/bus/pci/drivers_probe' <<<"$helper_text" || {
+		rm -f -- "$listing"
+		die "live installer Wi-Fi helper cannot reprobe WCN7850"
+	}
 	rm -f -- "$listing"
 }
 
