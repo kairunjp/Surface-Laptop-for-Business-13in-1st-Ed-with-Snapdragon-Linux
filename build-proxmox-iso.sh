@@ -13,6 +13,11 @@ DTB_NAME=${DTB_NAME:-surface-laptop-13-current.dtb}
 INITRD_FILE=${INITRD_FILE:-}
 LVM_MODULE_TREE=${LVM_MODULE_TREE:-}
 WCN7850_FIRMWARE_SOURCE=${WCN7850_FIRMWARE_SOURCE:-}
+# Optional ARM64 Debian package bundle for NetworkManager and the Wi-Fi CLI.
+# The binary packages are deliberately kept outside Git; pass a directory
+# containing network-manager, wpasupplicant, iw, rfkill, wireless-regdb and
+# their ARM64 dependencies when building an ISO.
+NETWORK_MANAGER_PACKAGE_DIR=${NETWORK_MANAGER_PACKAGE_DIR:-}
 EFI_IMAGE=${EFI_IMAGE:-}
 EL2_DTB_FILE=${EL2_DTB_FILE:-}
 EL2_DTB_NAME=${EL2_DTB_NAME:-surface-laptop-13-el2.dtb}
@@ -43,6 +48,7 @@ DEFAULT_KERNEL_IMAGE=$KERNEL_IMAGE
 DEFAULT_DTB_FILE=$DTB_FILE
 
 STAGE_DIR=
+NETWORK_MANAGER_PACKAGE_FILES=()
 
 die() {
 	printf 'ERROR: %s\n' "$*" >&2
@@ -94,6 +100,11 @@ Options:
                       Replace the LVM modules with files built with --kernel-image.
   --wcn7850-firmware DIR
                       Add ath12k/WCN7850 Wi-Fi firmware to the ISO initrd.
+  --network-manager-packages DIR
+                      Add ARM64 NetworkManager/nmcli, wpa_supplicant, iw,
+                      rfkill, wireless-regdb and dependency .deb files to the
+                      installer and installed target. Packages are build
+                      inputs and are not stored in Git.
   --no-initrd-modules Keep the selected initrd without adding built modules.
   --allow-untested-tcb Permit an EFI image containing another TCB build.
   --fat-boot          Put kernel/initramfs/DTBs/KVM EFI payload in one El Torito
@@ -186,6 +197,11 @@ parse_args() {
 				shift
 				(($#)) || die "--wcn7850-firmware needs a directory"
 				WCN7850_FIRMWARE_SOURCE=$1
+				;;
+			--network-manager-packages)
+				shift
+				(($#)) || die "--network-manager-packages needs a directory"
+				NETWORK_MANAGER_PACKAGE_DIR=$1
 				;;
 			--no-initrd-modules)
 				INCLUDE_MODULES=0
@@ -332,6 +348,130 @@ verify_efi_default_shim() {
 	printf 'EFI default: BOOTAA64.EFI matches shimaa64.efi (%s)\n' "$boot_hash"
 }
 
+add_network_manager_packages() {
+	local package package_name architecture target
+	local required
+
+	NETWORK_MANAGER_PACKAGE_FILES=()
+	[[ -n "$NETWORK_MANAGER_PACKAGE_DIR" ]] || return 0
+	[[ -d "$NETWORK_MANAGER_PACKAGE_DIR" ]] ||
+		die "NetworkManager package directory not found: $NETWORK_MANAGER_PACKAGE_DIR"
+
+	mkdir -p "$STAGE_DIR/proxmox/packages"
+	while IFS= read -r -d '' package; do
+		package_name=$(dpkg-deb -f "$package" Package) ||
+			die "cannot read package metadata: $package"
+		architecture=$(dpkg-deb -f "$package" Architecture) ||
+			die "cannot read package architecture: $package"
+		case "$architecture" in
+			arm64|all) ;;
+			*) die "NetworkManager package is not ARM64 or all-arch: $package_name ($architecture)" ;;
+		esac
+		target="$STAGE_DIR/proxmox/packages/$(basename "$package")"
+		cp --preserve=mode,timestamps "$package" "$target"
+		NETWORK_MANAGER_PACKAGE_FILES+=("$target")
+	done < <(find "$NETWORK_MANAGER_PACKAGE_DIR" -maxdepth 1 -type f -name '*.deb' -print0 | sort -z)
+
+	((${#NETWORK_MANAGER_PACKAGE_FILES[@]} > 0)) ||
+		die "NetworkManager package directory contains no .deb files: $NETWORK_MANAGER_PACKAGE_DIR"
+	for required in network-manager libnm0 wpasupplicant iw rfkill wireless-regdb; do
+		if ! printf '%s\n' "${NETWORK_MANAGER_PACKAGE_FILES[@]}" |
+			while IFS= read -r package; do
+				[[ "$(dpkg-deb -f "$package" Package)" == "$required" ]] && exit 0
+			done; then
+			die "NetworkManager package bundle is missing required package: $required"
+		fi
+	done
+	log "Adding ARM64 NetworkManager packages to installer and target"
+	printf '  %s\n' "${NETWORK_MANAGER_PACKAGE_FILES[@]##*/}"
+}
+
+augment_proxmox_installer_squashfs() {
+	local squashfs="$STAGE_DIR/pve-installer.squashfs"
+	local root_dir output_dir package
+	[[ -n "$NETWORK_MANAGER_PACKAGE_DIR" ]] || return 0
+	[[ -f "$squashfs" ]] || die "Proxmox installer squashfs not found: $squashfs"
+
+	root_dir=$(mktemp -d "$WORK_DIR/pve-installer-wifi.XXXXXX")
+	output_dir=$(mktemp "$WORK_DIR/pve-installer-squashfs.XXXXXX")
+	rm -f -- "$output_dir"
+	log "Adding nmcli and NetworkManager to the installer live environment"
+	unsquashfs -no-xattrs -d "$root_dir" "$squashfs" >/dev/null
+	for package in "${NETWORK_MANAGER_PACKAGE_FILES[@]}"; do
+		dpkg-deb -x "$package" "$root_dir"
+	done
+
+	# The live installer is SysV based rather than systemd based.  Start
+	# NetworkManager after D-Bus and keep ifupdown-managed bridges untouched;
+	# wlan* is intentionally left out of /etc/network/interfaces by the
+	# installer module patch below.
+	mkdir -p "$root_dir/etc/NetworkManager/conf.d" \
+		"$root_dir/etc/NetworkManager/system-connections" \
+		"$root_dir/usr/local/sbin"
+	cat >"$root_dir/etc/NetworkManager/conf.d/10-surface-wifi.conf" <<'EOF'
+[main]
+plugins=keyfile,ifupdown
+
+[ifupdown]
+managed=false
+
+[device-surface-wifi]
+match-device=interface-name:wlan*
+managed=true
+EOF
+	cat >"$root_dir/usr/local/sbin/surface-wifi-start" <<'EOF'
+#!/bin/sh
+# Start the live installer's Wi-Fi control path.  The installer does not use
+# systemd, so NetworkManager is not started by a systemd unit here.
+set -u
+
+if [ ! -s /run/dbus/pid ] && [ -x /etc/init.d/dbus ]; then
+    /etc/init.d/dbus start >/tmp/surface-dbus.log 2>&1 || true
+fi
+if ! pidof NetworkManager >/dev/null 2>&1; then
+    if [ -x /etc/init.d/network-manager ]; then
+        /etc/init.d/network-manager start >/tmp/surface-network-manager.log 2>&1 || true
+    fi
+fi
+sleep 1
+if ! pidof NetworkManager >/dev/null 2>&1; then
+    echo "surface-wifi: NetworkManager did not start; see /tmp/surface-network-manager.log" >&2
+    exit 1
+fi
+echo "surface-wifi: wlan0 is ready; use nmcli device wifi list/connect" >&2
+EOF
+	chmod 0755 "$root_dir/usr/local/sbin/surface-wifi-start"
+	for runlevel in 2 3 4 5; do
+		mkdir -p "$root_dir/etc/rc$runlevel.d"
+		ln -sfn ../init.d/network-manager "$root_dir/etc/rc$runlevel.d/S02network-manager"
+	done
+	mksquashfs "$root_dir" "$output_dir" -comp zstd -Xcompression-level 19 \
+		-b 1048576 -no-xattrs -noappend >/dev/null
+	mv -- "$output_dir" "$squashfs"
+	rm -rf -- "$root_dir"
+}
+
+verify_proxmox_installer_squashfs() {
+	local listing required squashfs="$STAGE_DIR/pve-installer.squashfs"
+	[[ -n "$NETWORK_MANAGER_PACKAGE_DIR" ]] || return 0
+	listing=$(mktemp "$WORK_DIR/installer-squash-list.XXXXXX")
+	unsquashfs -no-progress -ll "$squashfs" >"$listing"
+	for required in \
+		usr/bin/nmcli \
+		usr/sbin/NetworkManager \
+		usr/sbin/wpa_supplicant \
+		usr/sbin/iw \
+		usr/sbin/rfkill \
+		usr/local/sbin/surface-wifi-start \
+		etc/NetworkManager/conf.d/10-surface-wifi.conf; do
+		grep -Eq "squashfs-root/$required$" "$listing" || {
+			rm -f -- "$listing"
+			die "installer squashfs is missing NetworkManager Wi-Fi file: $required"
+		}
+	done
+	rm -f -- "$listing"
+}
+
 patch_proxmox_initrd_lvm() {
 	local initrd=$1 raw_initrd init_file manifest patched compressed release relative source metadata
 	local installer_module
@@ -362,6 +502,10 @@ patch_proxmox_initrd_lvm() {
 		die "cannot extract Proxmox::Install from the selected ISO"
 	python3 "$ROOT_DIR/initramfs/scripts/patch-proxmox-installer-efi.py" \
 		"$installer_module" "$init_file"
+	if [[ -n "$NETWORK_MANAGER_PACKAGE_DIR" ]]; then
+		python3 "$ROOT_DIR/initramfs/scripts/patch-proxmox-installer-wifi.py" \
+			"$installer_module"
+	fi
 	# Ventoy's cpio hook targets the older Proxmox /sys/block/hd* scanner.
 	# Current installer init uses /sys/class/block, so invoke Ventoy's official
 	# Proxmox disk hook explicitly before the ISO scan and accept its dm mapping.
@@ -407,7 +551,7 @@ patch_proxmox_initrd_lvm() {
 }
 
 verify_proxmox_installer_initrd() {
-	local initrd=$1 listing init_text required release relative expected actual extract_dir
+	local initrd=$1 listing init_text installer_text required release relative expected actual extract_dir
 	[[ -s "$initrd" ]] || die "installer initrd is missing or empty: $initrd"
 	listing=$(mktemp "$WORK_DIR/initrd-list.XXXXXX")
 	if ! zstd -q -dc "$initrd" | cpio -it --quiet >"$listing" 2>/dev/null; then
@@ -444,6 +588,18 @@ verify_proxmox_installer_initrd() {
 		rm -f -- "$listing"
 		die "initrd does not ask modprobe to resolve the thin-pool dependency stack: $initrd"
 	}
+	if [[ -n "$NETWORK_MANAGER_PACKAGE_DIR" ]]; then
+		installer_text=$(zstd -q -dc "$initrd" |
+			cpio -i --to-stdout surface-installer/Install.pm 2>/dev/null || true)
+		grep -Fq 'next if $name =~ /^wl/;' <<<"$installer_text" || {
+			rm -f -- "$listing"
+			die "installer module still emits an ifupdown stanza for Surface Wi-Fi"
+		}
+		grep -Fq 'match-device=interface-name:wlan*' <<<"$installer_text" || {
+			rm -f -- "$listing"
+			die "installer module does not install NetworkManager Wi-Fi configuration"
+		}
+	fi
 	grep -Fq 'SURFACE_USB_NET_DRIVERS="mii r8152 usbnet' <<<"$init_text" || {
 		rm -f -- "$listing"
 		die "initrd does not preload Surface USB network drivers: $initrd"
@@ -1390,6 +1546,10 @@ main() {
 	need file
 	need blkid
 	need mcopy
+	if [[ -n "$NETWORK_MANAGER_PACKAGE_DIR" ]]; then
+		need dpkg-deb
+		need mksquashfs
+	fi
 	if [[ "$FAT_BOOT" -eq 1 ]]; then
 		need mformat
 		need mmd
@@ -1437,6 +1597,9 @@ main() {
 	fi
 	if [[ -n "$WCN7850_FIRMWARE_SOURCE" ]]; then
 		WCN7850_FIRMWARE_SOURCE=$(absolute_path "$WCN7850_FIRMWARE_SOURCE")
+	fi
+	if [[ -n "$NETWORK_MANAGER_PACKAGE_DIR" ]]; then
+		NETWORK_MANAGER_PACKAGE_DIR=$(absolute_path "$NETWORK_MANAGER_PACKAGE_DIR")
 	fi
 	if [[ -n "$LVM_MODULE_TREE" ]]; then
 		[[ -d "$LVM_MODULE_TREE" ]] || die "LVM module tree not found: $LVM_MODULE_TREE"
@@ -1509,6 +1672,9 @@ main() {
 	# xorriso preserves ISO read-only mode bits.  The stage is disposable, so
 	# make it writable before replacing boot components or GRUB configuration.
 	chmod -R u+rwX -- "$STAGE_DIR"
+	add_network_manager_packages
+	augment_proxmox_installer_squashfs
+	verify_proxmox_installer_squashfs
 
 	log "Installing Surface kernel and DTB into ISO"
 	cp --preserve=mode,timestamps "$KERNEL_IMAGE" "$STAGE_DIR/boot/linux26"

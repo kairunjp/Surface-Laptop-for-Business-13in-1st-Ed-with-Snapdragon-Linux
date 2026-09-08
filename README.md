@@ -244,6 +244,7 @@ Fingerprint userspace setup (libfprint patch, fprintd) is documented in
 - `docs/device-tree.md` - what each overlay changes and why
 - `docs/bluetooth.md`, `docs/touchscreen.md`, `docs/fingerprint.md` -
   per-device notes with ACPI references and failure signatures
+- `docs/wifi.md` - WCN7850 Wi-Fi 7, NetworkManager, and `nmcli`
 - `docs/porting.md` - adapting to another distribution
 - `docs/recovery.md` - SURFACE-CURRENT recovery set
 

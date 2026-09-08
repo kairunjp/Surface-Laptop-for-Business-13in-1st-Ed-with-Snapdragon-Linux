@@ -71,3 +71,19 @@ individual inputs. Pass the target's
 installer initramfs can bring up Wi-Fi before the installed system is mounted.
 The result contains an unsigned development kernel, so Secure Boot must be
 disabled or the kernel must be signed before booting it.
+
+To make Wi-Fi available through `nmcli` both in the live installer and after
+installation, pass an external directory containing the ARM64 Debian package
+set. The packages are copied into the ISO and installed by the normal Proxmox
+package phase; they are not tracked in Git:
+
+```sh
+./build-proxmox-iso.sh \
+  --wcn7850-firmware /lib/firmware/ath12k/WCN7850/hw2.0 \
+  --network-manager-packages /path/to/arm64-network-manager-debs
+```
+
+The package directory must include `network-manager`, `libnm0`,
+`wpasupplicant`, `iw`, `rfkill`, `wireless-regdb`, and all dependencies needed
+by the selected Debian release. See [Wi-Fi 7 and `nmcli`](wifi.md) for the
+installer and post-install commands.
