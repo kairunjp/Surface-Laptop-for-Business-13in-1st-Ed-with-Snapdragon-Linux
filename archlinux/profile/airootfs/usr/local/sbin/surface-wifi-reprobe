@@ -6,7 +6,7 @@
 # real root and its firmware have been mounted.
 set -u
 
-firmware_dir=/usr/lib/firmware/ath12k/WCN7850/hw2.0
+firmware_dir=/lib/firmware/ath12k/WCN7850/hw2.0
 probe_path=/sys/bus/pci/drivers_probe
 
 wifi_present()
@@ -29,8 +29,17 @@ probe_wcn7850()
 		[ "$device_id" = 0x1107 ] || continue
 
 		if [ -L "$device/driver" ]; then
-			echo "surface-wifi: WCN7850 already has a driver (${device##*/})"
-			continue
+			driver_path=$(readlink "$device/driver" 2>/dev/null || true)
+			driver_name=${driver_path##*/}
+			if [ "$driver_name" != ath12k_wifi7_pci ]; then
+				echo "surface-wifi: WCN7850 has unexpected driver: $driver_name" >&2
+				continue
+			fi
+			echo "surface-wifi: unbinding failed ath12k probe at ${device##*/}"
+			if ! printf '%s\n' "${device##*/}" >"$device/driver/unbind"; then
+				echo "surface-wifi: failed to unbind ath12k_wifi7_pci" >&2
+				return 1
+			fi
 		fi
 		echo "surface-wifi: retrying unbound WCN7850 at ${device##*/}"
 		if ! printf '%s\n' "${device##*/}" >"$probe_path"; then

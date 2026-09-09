@@ -322,6 +322,8 @@ stage_profile() {
 	for relative in "${!FIRMWARE_SHA256[@]}"; do
 		install -D -m 0644 "$FIRMWARE_DIR/$relative" \
 			"$PROFILE_DIR/airootfs/usr/lib/firmware/$relative"
+		[[ -s "$PROFILE_DIR/airootfs/usr/lib/firmware/$relative" ]] ||
+			die "staged firmware is empty: $relative"
 	done
 	cp "$SURFACE_WORK_DIR/dtb/surface-laptop-13-archlinux.dtb" \
 		"$PROFILE_DIR/grub/surface-laptop-13-archlinux.dtb"

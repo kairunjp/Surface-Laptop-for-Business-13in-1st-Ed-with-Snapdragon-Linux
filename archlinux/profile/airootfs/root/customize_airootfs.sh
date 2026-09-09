@@ -27,6 +27,13 @@ done
     exit 1
 }
 
+for firmware in amss.bin m3.bin board-2.bin; do
+    if [[ ! -s "/lib/firmware/ath12k/WCN7850/hw2.0/$firmware" ]]; then
+        printf 'missing WCN7850 firmware: %s\n' "$firmware" >&2
+        exit 1
+    fi
+done
+
 depmod -a "$surface_release"
 mkinitcpio \
     -c /etc/mkinitcpio.conf.d/archiso.conf \
