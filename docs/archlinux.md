@@ -23,13 +23,14 @@ Both the live root and the early initramfs receive that same Wi-Fi set. The
 builder also handles the legacy Arch Linux ARM key certification required by
 newer GnuPG versions without disabling package signature verification.
 
-For CI, provide an HTTPS reference archive URL in the manual run's
-`wifi_firmware_url` input, or the repository variable `WCN7850_FIRMWARE_URL`
-for push builds. The archive must contain `amss.bin`, `m3.bin`, `board.bin`,
-`board-2.bin`, and `Notice.txt` at its root. The builder checks every file's
-size and SHA-256 before building the kernel. Missing or mismatched reference
-inputs fail the build; it does not substitute another board's calibration.
-The archive is an external build input, not committed firmware.
+CI uses the checked-in archive
+`build/archlinux-reference/surface-pve-wifi-reference.tar.gz` by default. A
+manual run may override it with an HTTPS URL through `wifi_firmware_url` (or
+the `WCN7850_FIRMWARE_URL` repository variable). The archive must contain
+`amss.bin`, `m3.bin`, `board.bin`, `board-2.bin`, and `Notice.txt` at its root.
+The builder checks every file's size and SHA-256 before building the kernel.
+Missing or mismatched reference inputs fail the build; it does not substitute
+another board's calibration.
 
 ## Local build
 

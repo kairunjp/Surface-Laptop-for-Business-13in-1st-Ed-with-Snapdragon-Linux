@@ -11,6 +11,7 @@ on:
       - device-tree/**
       - kernel/**
       - drivers/firmware-manifest.json
+      - build/archlinux-reference/**
   workflow_dispatch:
     inputs:
       wifi_firmware_url:

@@ -16,6 +16,7 @@ LINUX_FIRMWARE_BASE_URL=${LINUX_FIRMWARE_BASE_URL:-https://git.kernel.org/pub/sc
 WCN7850_FIRMWARE_SOURCE=${WCN7850_FIRMWARE_SOURCE:-}
 WCN7850_FIRMWARE_URL=${WCN7850_FIRMWARE_URL:-}
 SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-$(date +%s)}
+DEFAULT_WCN7850_FIRMWARE_SOURCE="$ROOT_DIR/build/archlinux-reference/surface-pve-wifi-reference.tar.gz"
 
 ROOTFS_DIR="$BUILD_DIR/rootfs"
 SHARED_DIR="$BUILD_DIR/shared"
@@ -253,11 +254,12 @@ download_firmware() {
 	local relative destination url expected wifi_source
 	log "Validating the surface-pve boot Wi-Fi firmware reference"
 	wifi_source="$WCN7850_FIRMWARE_SOURCE"
-	if [[ -z "$wifi_source" ]]; then
+	if [[ -n "$WCN7850_FIRMWARE_URL" ]]; then
 		wifi_source="$SHARED_DIR/surface-wifi-reference.tar.gz"
 		curl --proto '=https' --proto-redir '=https' -fL --retry 5 --max-filesize 16777216 \
 			"$WCN7850_FIRMWARE_URL" -o "$wifi_source"
 	fi
+	[[ -n "$wifi_source" ]] || die "Wi-Fi reference source is not configured"
 	python3 "$ROOT_DIR/archlinux/prepare-wifi-firmware.py" "$wifi_source" \
 		--output "$FIRMWARE_DIR/ath12k/WCN7850/hw2.0"
 	log "Downloading pinned Bluetooth firmware"
@@ -382,9 +384,12 @@ copy_and_hash_output() {
 
 main() {
 	local host_command
-	[[ -n "$WCN7850_FIRMWARE_SOURCE" || -n "$WCN7850_FIRMWARE_URL" ]] ||
-		die "set WCN7850_FIRMWARE_SOURCE (reference directory/archive) or WCN7850_FIRMWARE_URL (HTTPS archive); see docs/archlinux.md"
-	if [[ -n "$WCN7850_FIRMWARE_SOURCE" ]]; then
+	if [[ -z "$WCN7850_FIRMWARE_SOURCE" && -z "$WCN7850_FIRMWARE_URL" ]]; then
+		[[ -f "$DEFAULT_WCN7850_FIRMWARE_SOURCE" ]] ||
+			die "bundled Wi-Fi reference is missing: $DEFAULT_WCN7850_FIRMWARE_SOURCE"
+		WCN7850_FIRMWARE_SOURCE="$DEFAULT_WCN7850_FIRMWARE_SOURCE"
+	fi
+	if [[ -n "$WCN7850_FIRMWARE_SOURCE" && -z "$WCN7850_FIRMWARE_URL" ]]; then
 		WCN7850_FIRMWARE_SOURCE=$(absolute_path "$WCN7850_FIRMWARE_SOURCE")
 		case "$WCN7850_FIRMWARE_SOURCE/" in
 			"$BUILD_DIR/"*) die "Wi-Fi reference must be outside the disposable scratch directory" ;;

@@ -65,6 +65,6 @@
       "sha256": "facca00c7cbc988d843776f8b8f8f7926f24007a1cfc540d2219a005f596114f"
     }
   },
-  "note": "Qualcomm WCN7850 Wi-Fi and Bluetooth firmware hashes. Binary files are NOT distributed in this repository; obtain them from your OS vendor or an existing installation and verify these hashes before use.",
+  "note": "The WCN7850 Wi-Fi files in build/archlinux-reference/surface-pve-wifi-reference.tar.gz are the validated surface-pve boot set. Verify these hashes before changing them. Bluetooth files remain downloaded from the pinned linux-firmware revision by the builders.",
   "schema": 1
 }
