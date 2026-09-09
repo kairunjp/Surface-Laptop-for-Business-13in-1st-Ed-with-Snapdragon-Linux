@@ -190,10 +190,29 @@ install_archiso_build_dependencies() {
 }
 
 download_archiso() {
+	local mkarchiso
 	log "Fetching archiso ${ARCHISO_REF}"
 	git clone --depth=1 --branch "$ARCHISO_REF" \
 		https://github.com/archlinux/archiso.git "$ARCHISO_SOURCE_DIR"
 	[[ -x "$ARCHISO_SOURCE_DIR/archiso/mkarchiso" ]] || die "mkarchiso was not found"
+
+	# archiso's generic UEFI module list targets the x86_64 GRUB package.  The
+	# Arch Linux ARM arm64-efi package intentionally does not ship the AT
+	# keyboard and USB-serial modules.  It also does not include fdt in the
+	# generic list, although this profile uses GRUB's devicetree command.
+	mkarchiso="$ARCHISO_SOURCE_DIR/archiso/mkarchiso"
+	sed -i \
+		-e 's/at_keyboard //' \
+		-e 's/keylayouts //' \
+		-e 's/usb //' \
+		-e 's/usbserial_common //' \
+		-e 's/usbserial_ftdi //' \
+		-e 's/usbserial_pl2303 //' \
+		-e 's/usbserial_usbdebug //' \
+		-e 's/ fat font / fat font fdt /' \
+		"$mkarchiso"
+	grep -Fq 'font fdt' "$mkarchiso" || die "failed to add the AArch64 GRUB fdt module"
+	grep -Fq 'at_keyboard' "$mkarchiso" && die "AArch64 GRUB module list still contains at_keyboard"
 }
 
 download_kernel() {
