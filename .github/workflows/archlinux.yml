@@ -26,9 +26,6 @@ jobs:
     # the native ARM64 runner available to public repositories.
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 120
-    env:
-      ARCHLINUX_BUILD_DIR: ${{ runner.temp }}/surface-archlinux-build
-      ARCHLINUX_OUTPUT_DIR: ${{ github.workspace }}/build/archlinux
 
     steps:
       - name: Check out source
@@ -45,8 +42,8 @@ jobs:
       - name: Build ISO
         run: |
           sudo env \
-            ARCHLINUX_BUILD_DIR="$ARCHLINUX_BUILD_DIR" \
-            ARCHLINUX_OUTPUT_DIR="$ARCHLINUX_OUTPUT_DIR" \
+            ARCHLINUX_BUILD_DIR="$RUNNER_TEMP/surface-archlinux-build" \
+            ARCHLINUX_OUTPUT_DIR="$GITHUB_WORKSPACE/build/archlinux" \
             KERNEL_CROSS_COMPILE= \
             ./archlinux/build-iso.sh
 
