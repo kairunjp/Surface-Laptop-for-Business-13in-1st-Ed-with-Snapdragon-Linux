@@ -10,7 +10,13 @@ on:
       - build.sh
       - device-tree/**
       - kernel/**
+      - drivers/firmware-manifest.json
   workflow_dispatch:
+    inputs:
+      wifi_firmware_url:
+        description: 'HTTPS URL of the surface-pve boot Wi-Fi reference tar.gz (or use repository variable WCN7850_FIRMWARE_URL)'
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -26,6 +32,8 @@ jobs:
     # the native ARM64 runner available to public repositories.
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 120
+    env:
+      WCN7850_FIRMWARE_URL: ${{ inputs.wifi_firmware_url || vars.WCN7850_FIRMWARE_URL }}
 
     steps:
       - name: Check out source
@@ -42,6 +50,7 @@ jobs:
       - name: Build ISO
         run: |
           sudo env \
+            WCN7850_FIRMWARE_URL="$WCN7850_FIRMWARE_URL" \
             ARCHLINUX_BUILD_DIR="$RUNNER_TEMP/surface-archlinux-build" \
             ARCHLINUX_OUTPUT_DIR="$GITHUB_WORKSPACE/build/archlinux" \
             KERNEL_CROSS_COMPILE= \

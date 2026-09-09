@@ -13,8 +13,8 @@ ARCHLINUX_MIRROR=${ARCHLINUX_MIRROR:-'https://ca.us.mirror.archlinuxarm.org/$arc
 ARCHISO_REF=${ARCHISO_REF:-v90}
 LINUX_FIRMWARE_REVISION=${LINUX_FIRMWARE_REVISION:-e981caea6ed33c48d25b7dbf473327dbd01df163}
 LINUX_FIRMWARE_BASE_URL=${LINUX_FIRMWARE_BASE_URL:-https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git/plain}
-ATH12K_BDENCODER_REVISION=${ATH12K_BDENCODER_REVISION:-6df4dae3e2f5e4c2903f3cafd40996fc1b3639ce}
-ATH12K_BDENCODER_BASE_URL=${ATH12K_BDENCODER_BASE_URL:-https://raw.githubusercontent.com/qca/qca-swiss-army-knife}
+WCN7850_FIRMWARE_SOURCE=${WCN7850_FIRMWARE_SOURCE:-}
+WCN7850_FIRMWARE_URL=${WCN7850_FIRMWARE_URL:-}
 SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-$(date +%s)}
 
 ROOTFS_DIR="$BUILD_DIR/rootfs"
@@ -30,15 +30,7 @@ ROOTFS_MD5_FILE="$BUILD_DIR/ArchLinuxARM-aarch64-latest.tar.gz.md5"
 FIRMWARE_DIR="$SHARED_DIR/firmware"
 
 DEFAULT_LINUX_FIRMWARE_REVISION=e981caea6ed33c48d25b7dbf473327dbd01df163
-DEFAULT_ATH12K_BDENCODER_REVISION=6df4dae3e2f5e4c2903f3cafd40996fc1b3639ce
-ATH12K_BDENCODER_SHA256=fdcc8dc9628d67e500d496a1de22e82e136ddeaec32669ea1b3add93f2980652
-ATH12K_FALLBACK_BOARD_NAME='bus=pci,vendor=17cb,device=1107,subsystem-vendor=17cb,subsystem-device=3378,qmi-chip-id=2,qmi-board-id=255.bin'
-ATH12K_FALLBACK_BOARD_SHA256=0ef5f6f3cb124f33c6de52371819ccd7c13763ceb86d476a178fd56e4cdc26a3
-ATH12K_FALLBACK_BOARD_BYTES=88872
 declare -A FIRMWARE_SHA256=(
-	["ath12k/WCN7850/hw2.0/amss.bin"]=43aadfd3df887f27de74020273aee484bac6a31dd53068f91baf2a9b094d6a68
-	["ath12k/WCN7850/hw2.0/m3.bin"]=0e72f44df7defc269fe92dcea25d4d409046c04b77d41c510c52879b3dfc1055
-	["ath12k/WCN7850/hw2.0/board-2.bin"]=1abee7132dbccb523cca44a8de4e8968aa7bf5a5fcc032c338f687f94ea5bf4e
 	["qca/hmtbtfw20.tlv"]=f1c00f4640a5c4e5dc36a2574d3d1d0afcfd1ab58a84f217dce4b1bb73cba981
 	["qca/hmtnv20.b10f"]=f8d027c5f0ea54456d23b903c55e1a87b06df97ff26b83e3fd02ac6b265b5264
 	["qca/hmtnv20.b112"]=f8d027c5f0ea54456d23b903c55e1a87b06df97ff26b83e3fd02ac6b265b5264
@@ -258,8 +250,17 @@ build_surface_kernel_and_dtb() {
 }
 
 download_firmware() {
-	local relative destination url expected encoder encoder_url encoder_dir fallback_board
-	log "Downloading pinned WCN7850 and Bluetooth firmware"
+	local relative destination url expected wifi_source
+	log "Validating the surface-pve boot Wi-Fi firmware reference"
+	wifi_source="$WCN7850_FIRMWARE_SOURCE"
+	if [[ -z "$wifi_source" ]]; then
+		wifi_source="$SHARED_DIR/surface-wifi-reference.tar.gz"
+		curl --proto '=https' --proto-redir '=https' -fL --retry 5 --max-filesize 16777216 \
+			"$WCN7850_FIRMWARE_URL" -o "$wifi_source"
+	fi
+	python3 "$ROOT_DIR/archlinux/prepare-wifi-firmware.py" "$wifi_source" \
+		--output "$FIRMWARE_DIR/ath12k/WCN7850/hw2.0"
+	log "Downloading pinned Bluetooth firmware"
 	for relative in "${!FIRMWARE_SHA256[@]}"; do
 		destination="$FIRMWARE_DIR/$relative"
 		install -d "$(dirname "$destination")"
@@ -270,37 +271,6 @@ download_firmware() {
 			printf '%s\n' "$expected" | sha256sum -c -
 		fi
 	done
-
-	# This Surface reports subsystem 00ab:1414, which is not present in the
-	# upstream board-2.bin bundle.  ath12k's API-1 fallback accepts a single
-	# board file, so extract the known-compatible 17cb:3378 board-id 255 entry
-	# from the same bundle.  Pin and verify the Qualcomm extraction utility so a
-	# changed third-party script cannot silently alter the image.
-	encoder="$SHARED_DIR/ath12k-bdencoder"
-	encoder_url="${ATH12K_BDENCODER_BASE_URL%/}/${ATH12K_BDENCODER_REVISION}/tools/scripts/ath12k/ath12k-bdencoder"
-	curl -fL --retry 5 --retry-delay 2 "$encoder_url" -o "$encoder"
-	expected="$ATH12K_BDENCODER_SHA256  $encoder"
-	printf '%s\n' "$expected" | sha256sum -c -
-	encoder_dir="$SHARED_DIR/ath12k-board-extract"
-	install -d "$encoder_dir"
-	install -m 0644 \
-		"$FIRMWARE_DIR/ath12k/WCN7850/hw2.0/board-2.bin" \
-		"$encoder_dir/board-2.bin"
-	(
-		cd "$encoder_dir"
-		python3 "$encoder" --extract board-2.bin
-	)
-	fallback_board="$encoder_dir/$ATH12K_FALLBACK_BOARD_NAME"
-	[[ -s "$fallback_board" ]] || die "ath12k fallback board entry was not extracted"
-	install -D -m 0644 "$fallback_board" \
-		"$FIRMWARE_DIR/ath12k/WCN7850/hw2.0/board.bin"
-	if [[ "$LINUX_FIRMWARE_REVISION" == "$DEFAULT_LINUX_FIRMWARE_REVISION" && \
-		"$ATH12K_BDENCODER_REVISION" == "$DEFAULT_ATH12K_BDENCODER_REVISION" ]]; then
-		expected="$ATH12K_FALLBACK_BOARD_SHA256  $FIRMWARE_DIR/ath12k/WCN7850/hw2.0/board.bin"
-		printf '%s\n' "$expected" | sha256sum -c -
-		[[ "$(stat -c '%s' "$FIRMWARE_DIR/ath12k/WCN7850/hw2.0/board.bin")" == "$ATH12K_FALLBACK_BOARD_BYTES" ]] ||
-			die "unexpected ath12k fallback board size"
-	fi
 }
 
 build_no_dsp_dtbs() {
@@ -363,11 +333,10 @@ stage_profile() {
 		[[ -s "$PROFILE_DIR/airootfs/usr/lib/firmware/$relative" ]] ||
 			die "staged firmware is empty: $relative"
 	done
-	install -D -m 0644 \
-		"$FIRMWARE_DIR/ath12k/WCN7850/hw2.0/board.bin" \
-		"$PROFILE_DIR/airootfs/usr/lib/firmware/ath12k/WCN7850/hw2.0/board.bin"
-	[[ -s "$PROFILE_DIR/airootfs/usr/lib/firmware/ath12k/WCN7850/hw2.0/board.bin" ]] ||
-		die "staged firmware is empty: ath12k/WCN7850/hw2.0/board.bin"
+	python3 "$ROOT_DIR/archlinux/prepare-wifi-firmware.py" \
+		"$FIRMWARE_DIR/ath12k/WCN7850/hw2.0" \
+		--output "$PROFILE_DIR/airootfs/usr/lib/firmware/ath12k/WCN7850/hw2.0" \
+		>"$PROFILE_DIR/airootfs/usr/lib/surface-laptop-13/wifi-sha256sums"
 	cp "$SURFACE_WORK_DIR/dtb/surface-laptop-13-archlinux.dtb" \
 		"$PROFILE_DIR/grub/surface-laptop-13-archlinux.dtb"
 	cp "$SURFACE_WORK_DIR/dtb/surface-laptop-13-archlinux-bluetooth.dtb" \
@@ -379,8 +348,7 @@ trim_build_inputs() {
 	# stage_profile has copied everything mkarchiso needs into PROFILE_DIR. Keep
 	# only the bootstrap chroot, archiso source, profile, and archiso work/output
 	# directories for the final image build; GitHub's ARM runner has limited disk.
-	rm -rf -- "$KERNEL_SOURCE_DIR" "$SURFACE_OUTPUT_DIR" "$SURFACE_WORK_DIR" "$FIRMWARE_DIR" \
-		"$SHARED_DIR/ath12k-bdencoder" "$SHARED_DIR/ath12k-board-extract"
+	rm -rf -- "$KERNEL_SOURCE_DIR" "$SURFACE_OUTPUT_DIR" "$SURFACE_WORK_DIR" "$FIRMWARE_DIR"
 	rm -f -- "$BUILD_DIR"/linux-*.tar.gz "$BUILD_DIR/surface-no-dsp.dtbo" \
 		"$ROOTFS_ARCHIVE" "$ROOTFS_MD5_FILE"
 }
@@ -414,12 +382,22 @@ copy_and_hash_output() {
 
 main() {
 	local host_command
+	[[ -n "$WCN7850_FIRMWARE_SOURCE" || -n "$WCN7850_FIRMWARE_URL" ]] ||
+		die "set WCN7850_FIRMWARE_SOURCE (reference directory/archive) or WCN7850_FIRMWARE_URL (HTTPS archive); see docs/archlinux.md"
+	if [[ -n "$WCN7850_FIRMWARE_SOURCE" ]]; then
+		WCN7850_FIRMWARE_SOURCE=$(absolute_path "$WCN7850_FIRMWARE_SOURCE")
+		case "$WCN7850_FIRMWARE_SOURCE/" in
+			"$BUILD_DIR/"*) die "Wi-Fi reference must be outside the disposable scratch directory" ;;
+		esac
+		python3 "$ROOT_DIR/archlinux/prepare-wifi-firmware.py" "$WCN7850_FIRMWARE_SOURCE"
+	fi
 	[[ "$(uname -m)" == aarch64 ]] || die "Arch Linux ARM ISO builds must run on an AArch64 host"
 	[[ "$(id -u)" -eq 0 ]] || die "run this builder as root (for example: sudo ./archlinux/build-iso.sh)"
 	for host_command in awk bsdtar chroot curl dtc fdtoverlay fdtget findmnt git make md5sum mount python3 sha256sum stat tar umount; do
 		need "$host_command"
 	done
 	reset_scratch
+	download_firmware
 	download_rootfs
 	prepare_rootfs_network
 	mount_chroot_filesystems
@@ -428,7 +406,6 @@ main() {
 	download_archiso
 	download_kernel
 	build_surface_kernel_and_dtb
-	download_firmware
 	build_no_dsp_dtbs
 	stage_profile
 	trim_build_inputs

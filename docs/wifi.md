@@ -62,7 +62,7 @@ dmesg | grep -Ei 'ath12k|firmware|wlan'
 ```
 
 The WCN7850 firmware must be present under
-`/lib/firmware/ath12k/WCN7850/hw2.0`; the ISO builder includes both the
-upstream `board-2.bin` bundle and a generated `board.bin` fallback for the
-Surface subsystem ID. It includes both files in the live root and the early
-initramfs so ath12k can obtain the BDF before the live root is mounted.
+`/lib/firmware/ath12k/WCN7850/hw2.0`; the Proxmox builder accepts that directory
+with `--wcn7850-firmware`. The Arch builder requires the working boot firmware
+reference described in [archlinux.md](archlinux.md), including its original
+`board.bin`. Both the live root and early initramfs need the same set.

@@ -34,6 +34,13 @@ for firmware in amss.bin m3.bin board.bin board-2.bin; do
     fi
 done
 
+# Detect package installation replacing any part of the reference set before
+# mkinitcpio copies it into the boot image.
+(
+    cd /lib/firmware/ath12k/WCN7850/hw2.0
+    sha256sum -c "$surface_root/wifi-sha256sums"
+)
+
 depmod -a "$surface_release"
 mkinitcpio \
     -c /etc/mkinitcpio.conf.d/archiso.conf \

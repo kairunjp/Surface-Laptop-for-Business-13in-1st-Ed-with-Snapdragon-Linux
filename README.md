@@ -54,6 +54,11 @@ WCN7850 firmware, and publishes the ISO as an Actions artifact. Run it from
 the branch's Actions page with **Build Arch Linux ARM64 ISO**, or push a change
 to the branch to trigger it automatically.
 
+Supply the working boot Wi-Fi reference archive through the manual input
+`wifi_firmware_url` or repository variable `WCN7850_FIRMWARE_URL`; see
+[the reference requirements](docs/archlinux.md). Builds require this external
+input to reproduce the Wi-Fi firmware verified on `surface-pve`.
+
 The same build can be run locally on an AArch64 Arch Linux ARM host as root:
 
 ```sh
