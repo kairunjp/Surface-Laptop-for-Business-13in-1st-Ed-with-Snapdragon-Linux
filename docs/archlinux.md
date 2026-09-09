@@ -55,3 +55,7 @@ The ISO is a live environment, not an unattended disk installer. Log in as
 `root` at the console and use the normal Arch installation tools or the
 included `archinstall` command after bringing up networking with
 NetworkManager/iwd.
+
+The image also enables `surface-wifi-reprobe.service`. It retries the WCN7850
+PCI probe after the live root and its firmware are available, covering boots
+where the built-in `ath12k` driver probes too early during initramfs startup.

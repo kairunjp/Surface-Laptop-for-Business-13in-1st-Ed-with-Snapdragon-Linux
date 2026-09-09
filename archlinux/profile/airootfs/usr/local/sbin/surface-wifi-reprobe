@@ -1,0 +1,66 @@
+#!/bin/sh
+
+# The Surface kernel builds ath12k into the kernel.  On some boots it probes
+# the PCI device before the external initramfs firmware is available, then
+# leaves the device unbound.  Retry only the known WCN7850 PCI ID after the
+# real root and its firmware have been mounted.
+set -u
+
+firmware_dir=/usr/lib/firmware/ath12k/WCN7850/hw2.0
+probe_path=/sys/bus/pci/drivers_probe
+
+wifi_present()
+{
+	for interface in /sys/class/net/*; do
+		[ -d "$interface/wireless" ] && return 0
+	done
+	return 1
+}
+
+probe_wcn7850()
+{
+	local device vendor device_id
+
+	for device in /sys/bus/pci/devices/*; do
+		[ -r "$device/vendor" ] && [ -r "$device/device" ] || continue
+		vendor=$(cat "$device/vendor")
+		device_id=$(cat "$device/device")
+		[ "$vendor" = 0x17cb ] || continue
+		[ "$device_id" = 0x1107 ] || continue
+
+		if [ -L "$device/driver" ]; then
+			echo "surface-wifi: WCN7850 already has a driver (${device##*/})"
+			continue
+		fi
+		echo "surface-wifi: retrying unbound WCN7850 at ${device##*/}"
+		if ! printf '%s\n' "${device##*/}" >"$probe_path"; then
+			echo "surface-wifi: WCN7850 reprobe failed" >&2
+			return 1
+		fi
+	done
+}
+
+if wifi_present; then
+	exit 0
+fi
+
+if [ ! -w "$probe_path" ]; then
+	echo "surface-wifi: PCI driver probe interface is unavailable" >&2
+	exit 1
+fi
+
+for firmware in amss.bin m3.bin board-2.bin; do
+	if [ ! -s "$firmware_dir/$firmware" ]; then
+		echo "surface-wifi: missing WCN7850 firmware: $firmware" >&2
+		exit 1
+	fi
+done
+
+for attempt in 1 2 3 4 5; do
+	probe_wcn7850 || exit 1
+	wifi_present && exit 0
+	sleep 1
+done
+
+echo "surface-wifi: no wireless interface after WCN7850 reprobe" >&2
+exit 1

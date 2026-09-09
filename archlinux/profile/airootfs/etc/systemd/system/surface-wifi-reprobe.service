@@ -1,0 +1,13 @@
+[Unit]
+Description=Retry Surface WCN7850 Wi-Fi initialization
+Wants=NetworkManager.service
+After=local-fs.target systemd-udev-settle.service NetworkManager.service
+ConditionPathExists=/sys/bus/pci/drivers_probe
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/surface-wifi-reprobe
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

@@ -33,4 +33,4 @@ mkinitcpio \
     -k "$surface_release" \
     -g /boot/initramfs-linux.img
 
-systemctl enable NetworkManager.service
+systemctl enable NetworkManager.service surface-wifi-reprobe.service
