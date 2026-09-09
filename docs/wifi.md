@@ -62,5 +62,7 @@ dmesg | grep -Ei 'ath12k|firmware|wlan'
 ```
 
 The WCN7850 firmware must be present under
-`/lib/firmware/ath12k/WCN7850/hw2.0`; the ISO builder accepts that directory
-with `--wcn7850-firmware` and includes it in the installer initramfs.
+`/lib/firmware/ath12k/WCN7850/hw2.0`; the ISO builder includes both the
+upstream `board-2.bin` bundle and a generated `board.bin` fallback for the
+Surface subsystem ID. It includes both files in the live root and the early
+initramfs so ath12k can obtain the BDF before the live root is mounted.

@@ -58,7 +58,7 @@ if [ ! -w "$probe_path" ]; then
 	exit 1
 fi
 
-for firmware in amss.bin m3.bin board-2.bin; do
+for firmware in amss.bin m3.bin board.bin board-2.bin; do
 	if [ ! -s "$firmware_dir/$firmware" ]; then
 		echo "surface-wifi: missing WCN7850 firmware: $firmware" >&2
 		exit 1

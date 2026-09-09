@@ -13,6 +13,8 @@ ARCHLINUX_MIRROR=${ARCHLINUX_MIRROR:-'https://ca.us.mirror.archlinuxarm.org/$arc
 ARCHISO_REF=${ARCHISO_REF:-v90}
 LINUX_FIRMWARE_REVISION=${LINUX_FIRMWARE_REVISION:-e981caea6ed33c48d25b7dbf473327dbd01df163}
 LINUX_FIRMWARE_BASE_URL=${LINUX_FIRMWARE_BASE_URL:-https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git/plain}
+ATH12K_BDENCODER_REVISION=${ATH12K_BDENCODER_REVISION:-6df4dae3e2f5e4c2903f3cafd40996fc1b3639ce}
+ATH12K_BDENCODER_BASE_URL=${ATH12K_BDENCODER_BASE_URL:-https://raw.githubusercontent.com/qca/qca-swiss-army-knife}
 SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-$(date +%s)}
 
 ROOTFS_DIR="$BUILD_DIR/rootfs"
@@ -28,6 +30,11 @@ ROOTFS_MD5_FILE="$BUILD_DIR/ArchLinuxARM-aarch64-latest.tar.gz.md5"
 FIRMWARE_DIR="$SHARED_DIR/firmware"
 
 DEFAULT_LINUX_FIRMWARE_REVISION=e981caea6ed33c48d25b7dbf473327dbd01df163
+DEFAULT_ATH12K_BDENCODER_REVISION=6df4dae3e2f5e4c2903f3cafd40996fc1b3639ce
+ATH12K_BDENCODER_SHA256=fdcc8dc9628d67e500d496a1de22e82e136ddeaec32669ea1b3add93f2980652
+ATH12K_FALLBACK_BOARD_NAME='bus=pci,vendor=17cb,device=1107,subsystem-vendor=17cb,subsystem-device=3378,qmi-chip-id=2,qmi-board-id=255.bin'
+ATH12K_FALLBACK_BOARD_SHA256=0ef5f6f3cb124f33c6de52371819ccd7c13763ceb86d476a178fd56e4cdc26a3
+ATH12K_FALLBACK_BOARD_BYTES=88872
 declare -A FIRMWARE_SHA256=(
 	["ath12k/WCN7850/hw2.0/amss.bin"]=43aadfd3df887f27de74020273aee484bac6a31dd53068f91baf2a9b094d6a68
 	["ath12k/WCN7850/hw2.0/m3.bin"]=0e72f44df7defc269fe92dcea25d4d409046c04b77d41c510c52879b3dfc1055
@@ -251,7 +258,7 @@ build_surface_kernel_and_dtb() {
 }
 
 download_firmware() {
-	local relative destination url expected
+	local relative destination url expected encoder encoder_url encoder_dir fallback_board
 	log "Downloading pinned WCN7850 and Bluetooth firmware"
 	for relative in "${!FIRMWARE_SHA256[@]}"; do
 		destination="$FIRMWARE_DIR/$relative"
@@ -263,6 +270,37 @@ download_firmware() {
 			printf '%s\n' "$expected" | sha256sum -c -
 		fi
 	done
+
+	# This Surface reports subsystem 00ab:1414, which is not present in the
+	# upstream board-2.bin bundle.  ath12k's API-1 fallback accepts a single
+	# board file, so extract the known-compatible 17cb:3378 board-id 255 entry
+	# from the same bundle.  Pin and verify the Qualcomm extraction utility so a
+	# changed third-party script cannot silently alter the image.
+	encoder="$SHARED_DIR/ath12k-bdencoder"
+	encoder_url="${ATH12K_BDENCODER_BASE_URL%/}/${ATH12K_BDENCODER_REVISION}/tools/scripts/ath12k/ath12k-bdencoder"
+	curl -fL --retry 5 --retry-delay 2 "$encoder_url" -o "$encoder"
+	expected="$ATH12K_BDENCODER_SHA256  $encoder"
+	printf '%s\n' "$expected" | sha256sum -c -
+	encoder_dir="$SHARED_DIR/ath12k-board-extract"
+	install -d "$encoder_dir"
+	install -m 0644 \
+		"$FIRMWARE_DIR/ath12k/WCN7850/hw2.0/board-2.bin" \
+		"$encoder_dir/board-2.bin"
+	(
+		cd "$encoder_dir"
+		python3 "$encoder" --extract board-2.bin
+	)
+	fallback_board="$encoder_dir/$ATH12K_FALLBACK_BOARD_NAME"
+	[[ -s "$fallback_board" ]] || die "ath12k fallback board entry was not extracted"
+	install -D -m 0644 "$fallback_board" \
+		"$FIRMWARE_DIR/ath12k/WCN7850/hw2.0/board.bin"
+	if [[ "$LINUX_FIRMWARE_REVISION" == "$DEFAULT_LINUX_FIRMWARE_REVISION" && \
+		"$ATH12K_BDENCODER_REVISION" == "$DEFAULT_ATH12K_BDENCODER_REVISION" ]]; then
+		expected="$ATH12K_FALLBACK_BOARD_SHA256  $FIRMWARE_DIR/ath12k/WCN7850/hw2.0/board.bin"
+		printf '%s\n' "$expected" | sha256sum -c -
+		[[ "$(stat -c '%s' "$FIRMWARE_DIR/ath12k/WCN7850/hw2.0/board.bin")" == "$ATH12K_FALLBACK_BOARD_BYTES" ]] ||
+			die "unexpected ath12k fallback board size"
+	fi
 }
 
 build_no_dsp_dtbs() {
@@ -325,6 +363,11 @@ stage_profile() {
 		[[ -s "$PROFILE_DIR/airootfs/usr/lib/firmware/$relative" ]] ||
 			die "staged firmware is empty: $relative"
 	done
+	install -D -m 0644 \
+		"$FIRMWARE_DIR/ath12k/WCN7850/hw2.0/board.bin" \
+		"$PROFILE_DIR/airootfs/usr/lib/firmware/ath12k/WCN7850/hw2.0/board.bin"
+	[[ -s "$PROFILE_DIR/airootfs/usr/lib/firmware/ath12k/WCN7850/hw2.0/board.bin" ]] ||
+		die "staged firmware is empty: ath12k/WCN7850/hw2.0/board.bin"
 	cp "$SURFACE_WORK_DIR/dtb/surface-laptop-13-archlinux.dtb" \
 		"$PROFILE_DIR/grub/surface-laptop-13-archlinux.dtb"
 	cp "$SURFACE_WORK_DIR/dtb/surface-laptop-13-archlinux-bluetooth.dtb" \
@@ -336,7 +379,8 @@ trim_build_inputs() {
 	# stage_profile has copied everything mkarchiso needs into PROFILE_DIR. Keep
 	# only the bootstrap chroot, archiso source, profile, and archiso work/output
 	# directories for the final image build; GitHub's ARM runner has limited disk.
-	rm -rf -- "$KERNEL_SOURCE_DIR" "$SURFACE_OUTPUT_DIR" "$SURFACE_WORK_DIR" "$FIRMWARE_DIR"
+	rm -rf -- "$KERNEL_SOURCE_DIR" "$SURFACE_OUTPUT_DIR" "$SURFACE_WORK_DIR" "$FIRMWARE_DIR" \
+		"$SHARED_DIR/ath12k-bdencoder" "$SHARED_DIR/ath12k-board-extract"
 	rm -f -- "$BUILD_DIR"/linux-*.tar.gz "$BUILD_DIR/surface-no-dsp.dtbo" \
 		"$ROOTFS_ARCHIVE" "$ROOTFS_MD5_FILE"
 }
@@ -372,7 +416,7 @@ main() {
 	local host_command
 	[[ "$(uname -m)" == aarch64 ]] || die "Arch Linux ARM ISO builds must run on an AArch64 host"
 	[[ "$(id -u)" -eq 0 ]] || die "run this builder as root (for example: sudo ./archlinux/build-iso.sh)"
-	for host_command in awk bsdtar chroot curl dtc fdtoverlay fdtget findmnt git make md5sum mount sha256sum tar umount; do
+	for host_command in awk bsdtar chroot curl dtc fdtoverlay fdtget findmnt git make md5sum mount python3 sha256sum stat tar umount; do
 		need "$host_command"
 	done
 	reset_scratch
