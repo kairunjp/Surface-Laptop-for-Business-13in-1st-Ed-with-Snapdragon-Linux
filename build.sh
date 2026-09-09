@@ -52,6 +52,10 @@ EL2_DTS=${EL2_DTS:-$PUBLIC_DIR/device-tree/overlays/x1e-el2.dtso}
 UKIFY=${UKIFY:-}
 UKI_STUB=${UKI_STUB:-/usr/lib/systemd/boot/efi/linuxaa64.efi.stub}
 KERNEL_JOBS=${KERNEL_JOBS:-$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)}
+# Keep the Debian cross-compiler default, but allow a native AArch64 build to
+# pass an empty prefix.  This is used by the Arch Linux ARM CI workflow, where
+# the GitHub runner already executes AArch64 binaries natively.
+KERNEL_CROSS_COMPILE=${KERNEL_CROSS_COMPILE-aarch64-linux-gnu-}
 
 # kbuild changes directory before interpreting O= and INSTALL_MOD_PATH.
 # Normalize caller-supplied relative scratch paths first, otherwise those
@@ -195,7 +199,12 @@ check_kernel_features() {
 }
 
 build_kernel() {
-	need make; need aarch64-linux-gnu-gcc
+	need make
+	if [[ -n "$KERNEL_CROSS_COMPILE" ]]; then
+		need "${KERNEL_CROSS_COMPILE}gcc"
+	else
+		need gcc
+	fi
 	[[ -f "$KERNEL_SOURCE/Makefile" ]] || die "kernel source directory not found: $KERNEL_SOURCE"
 	mkdirs
 	if [[ ! -f "$KERNEL_SOURCE/.config" && ! -d "$KERNEL_SOURCE/include/config" && ! -d "$KERNEL_SOURCE/arch/arm64/include/generated" ]]; then
@@ -224,7 +233,7 @@ build_kernel() {
 	mkdir -p "$KERNEL_OUT" "$MODULE_OUT"
 	cp "$KERNEL_CONFIG" "$KERNEL_OUT/.config"
 	merge_kernel_config
-	make -C "$KERNEL_WORK_SOURCE" O="$KERNEL_OUT" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
+	make -C "$KERNEL_WORK_SOURCE" O="$KERNEL_OUT" ARCH=arm64 CROSS_COMPILE="$KERNEL_CROSS_COMPILE" olddefconfig
 	if grep -q '^CONFIG_LOCALVERSION=' "$KERNEL_OUT/.config"; then
 		sed -i -E 's#^CONFIG_LOCALVERSION=.*#CONFIG_LOCALVERSION="-surface-laptop-13"#' "$KERNEL_OUT/.config"
 	else
@@ -235,16 +244,16 @@ if grep -q '^CONFIG_LOCALVERSION_AUTO=' "$KERNEL_OUT/.config"; then
 	else
 		printf '%s\n' 'CONFIG_LOCALVERSION_AUTO=n' >>"$KERNEL_OUT/.config"
 	fi
-	make -C "$KERNEL_WORK_SOURCE" O="$KERNEL_OUT" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
+	make -C "$KERNEL_WORK_SOURCE" O="$KERNEL_OUT" ARCH=arm64 CROSS_COMPILE="$KERNEL_CROSS_COMPILE" olddefconfig
 	apply_public_patches
 	# Re-run configuration after optional source patches; no private distro
 	# settings are added here.
-	make -C "$KERNEL_WORK_SOURCE" O="$KERNEL_OUT" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
+	make -C "$KERNEL_WORK_SOURCE" O="$KERNEL_OUT" ARCH=arm64 CROSS_COMPILE="$KERNEL_CROSS_COMPILE" olddefconfig
 	log "Building ARM64 kernel and modules"
-	make -C "$KERNEL_WORK_SOURCE" O="$KERNEL_OUT" -j"$KERNEL_JOBS" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- Image modules
-	make -C "$KERNEL_WORK_SOURCE" O="$KERNEL_OUT" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- INSTALL_MOD_PATH="$MODULE_OUT" modules_install
+	make -C "$KERNEL_WORK_SOURCE" O="$KERNEL_OUT" -j"$KERNEL_JOBS" ARCH=arm64 CROSS_COMPILE="$KERNEL_CROSS_COMPILE" Image modules
+	make -C "$KERNEL_WORK_SOURCE" O="$KERNEL_OUT" ARCH=arm64 CROSS_COMPILE="$KERNEL_CROSS_COMPILE" INSTALL_MOD_PATH="$MODULE_OUT" modules_install
 	local krel
-	krel=$(make -s -C "$KERNEL_WORK_SOURCE" O="$KERNEL_OUT" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- kernelrelease)
+	krel=$(make -s -C "$KERNEL_WORK_SOURCE" O="$KERNEL_OUT" ARCH=arm64 CROSS_COMPILE="$KERNEL_CROSS_COMPILE" kernelrelease)
 	cp "$KERNEL_OUT/arch/arm64/boot/Image" "$kernel_image"
 	cp "$KERNEL_OUT/.config" "$kernel_config"
 	check_kernel_features "$kernel_config"

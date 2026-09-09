@@ -28,7 +28,8 @@ the internal microphone has never worked.
 
 ## Building
 
-You need a kernel checkout and an AArch64 cross compiler. Then:
+You need a kernel checkout and either an AArch64 cross compiler or a native
+AArch64 build host. Then:
 
 ```sh
 ./build.sh check      # verify inputs exist
@@ -42,6 +43,29 @@ You need a kernel checkout and an AArch64 cross compiler. Then:
 
 `Containerfile` builds the same thing in Docker/Podman if you prefer a
 container. The kernel build is the slow part; everything else takes seconds.
+
+
+## Arch Linux ARM64 ISO
+
+The `archlinux` branch contains a GitHub Actions workflow which builds a
+bootable Arch Linux ARM64 live ISO for this laptop. It runs on GitHub's native
+ARM64 runner, builds the locked kernel revision, adds the Surface DTBs and
+WCN7850 firmware, and publishes the ISO as an Actions artifact. Run it from
+the branch's Actions page with **Build Arch Linux ARM64 ISO**, or push a change
+to the branch to trigger it automatically.
+
+The same build can be run locally on an AArch64 Arch Linux ARM host as root:
+
+```sh
+sudo ./archlinux/build-iso.sh
+```
+
+The scratch directory must have several GiB free; set
+`ARCHLINUX_BUILD_DIR` and `ARCHLINUX_OUTPUT_DIR` to change its locations. The
+ISO uses the safe no-DSP DTB because the Surface DSP firmware is not
+redistributed by this repository, so audio is intentionally disabled in this
+live image. Secure Boot may need to be disabled because the development
+kernel and GRUB payload are unsigned.
 
 
 ## Boot files
@@ -279,6 +303,7 @@ Fingerprint userspace setup (libfprint patch, fprintd) is documented in
 - `docs/wifi.md` - WCN7850 Wi-Fi 7, NetworkManager, and `nmcli`
 - `docs/porting.md` - adapting to another distribution
 - `docs/recovery.md` - SURFACE-CURRENT recovery set
+- `docs/archlinux.md` - Arch Linux ARM64 ISO workflow and boot notes
 
 
 ## Firmware note

@@ -13,6 +13,9 @@ The public build has four independent inputs:
 creates a partition table, mounts an ESP, writes a block device, builds a root
 filesystem, or starts a package manager.
 
+The kernel build uses the `aarch64-linux-gnu-` compiler prefix by default. On
+an AArch64 host, set `KERNEL_CROSS_COMPILE=` to use the native compiler.
+
 The command line contains `root=UUID=CHANGE-ME` as a safe placeholder. A
 distribution integration must replace it with the UUID or label of its own
 root filesystem before deployment.

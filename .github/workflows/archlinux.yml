@@ -1,0 +1,76 @@
+name: Build Arch Linux ARM64 ISO
+
+on:
+  push:
+    branches:
+      - archlinux
+    paths:
+      - .github/workflows/archlinux.yml
+      - archlinux/**
+      - build.sh
+      - device-tree/**
+      - kernel/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: archlinux-iso-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build Surface Laptop 13 Arch Linux ARM64 ISO
+    # archiso does not support cross-architecture image creation.  This is
+    # the native ARM64 runner available to public repositories.
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 120
+    env:
+      ARCHLINUX_BUILD_DIR: ${{ runner.temp }}/surface-archlinux-build
+      ARCHLINUX_OUTPUT_DIR: ${{ github.workspace }}/build/archlinux
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install host build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            bc bison build-essential ca-certificates cpio curl \
+            device-tree-compiler file flex gcc git kmod libarchive-tools \
+            libelf-dev libssl-dev openssl patch python3 ripgrep xorriso xz-utils
+
+      - name: Build ISO
+        run: |
+          sudo env \
+            ARCHLINUX_BUILD_DIR="$ARCHLINUX_BUILD_DIR" \
+            ARCHLINUX_OUTPUT_DIR="$ARCHLINUX_OUTPUT_DIR" \
+            KERNEL_CROSS_COMPILE= \
+            ./archlinux/build-iso.sh
+
+      - name: Verify ISO artifact
+        run: |
+          iso=$(find build/archlinux -maxdepth 1 -type f -name '*.iso' -print -quit)
+          test -n "$iso"
+          file "$iso"
+          test -s build/archlinux/SHA256SUMS
+          (cd build/archlinux && sha256sum -c SHA256SUMS)
+          boot_files=$(xorriso -indev "$iso" -find /arch/boot/aarch64 -type f -exec lsdl --)
+          printf '%s\n' "$boot_files"
+          grep -Fq '/arch/boot/aarch64/vmlinuz-linux' <<<"$boot_files"
+          grep -Fq '/arch/boot/aarch64/initramfs-linux.img' <<<"$boot_files"
+          dtb_files=$(xorriso -indev "$iso" -find /boot/grub -type f -exec lsdl --)
+          printf '%s\n' "$dtb_files"
+          grep -Fq 'surface-laptop-13-archlinux.dtb' <<<"$dtb_files"
+          grep -Fq 'surface-laptop-13-archlinux-bluetooth.dtb' <<<"$dtb_files"
+
+      - name: Upload ISO artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: surface-laptop-13-archlinux-arm64
+          if-no-files-found: error
+          path: |
+            build/archlinux/*.iso
+            build/archlinux/SHA256SUMS
