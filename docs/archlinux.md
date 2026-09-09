@@ -18,7 +18,9 @@ The runner downloads the current Arch Linux ARM AArch64 bootstrap rootfs and
 updates it with `pacman`. It fetches archiso `v90`, builds the kernel revision
 locked in `kernel/source.lock`, and obtains the required WCN7850/BT
 firmware files from the pinned linux-firmware revision. The firmware files are
-checked against SHA-256 values before they enter the image.
+checked against SHA-256 values before they enter the image. The builder also
+handles the legacy Arch Linux ARM key certification required by newer GnuPG
+versions without disabling package signature verification.
 
 ## Local build
 

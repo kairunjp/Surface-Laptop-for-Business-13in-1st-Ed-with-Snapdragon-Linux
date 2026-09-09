@@ -154,6 +154,14 @@ prepare_rootfs_network() {
 install_archiso_build_dependencies() {
 	log "Installing Arch Linux ARM build dependencies"
 	run_chroot pacman-key --init
+	# The Arch Linux ARM package key has legacy SHA-1 certifications. Newer
+	# GnuPG versions reject those while importing the vendor keyring, leaving
+	# the key at unknown trust and even rejecting archlinuxarm-keyring itself.
+	# Permit the legacy key certification only during this bootstrap; package
+	# signature checking remains Required in pacman.conf.
+	run_chroot sh -c \
+		'printf "%s\\n" allow-weak-key-signatures >> /etc/pacman.d/gnupg/gpg.conf'
+	run_chroot pacman-key --populate archlinuxarm
 	run_chroot pacman -Sy --noconfirm archlinuxarm-keyring
 	run_chroot pacman-key --populate archlinuxarm
 	run_chroot pacman -Syu --noconfirm
