@@ -5,10 +5,13 @@ build() {
   for firmware in amss.bin m3.bin board.bin board-2.bin; do
     add_file_early "/lib/firmware/ath12k/WCN7850/hw2.0/$firmware"
   done
+  for firmware in regulatory.db regulatory.db.p7s; do
+    add_file_early "/lib/firmware/$firmware"
+  done
 }
 
 help() {
   cat <<HELPEOF
-Adds the Surface WCN7850 Wi-Fi firmware to mkinitcpio's early CPIO.
+Adds Surface WCN7850 and regulatory firmware to mkinitcpio's early CPIO.
 HELPEOF
 }

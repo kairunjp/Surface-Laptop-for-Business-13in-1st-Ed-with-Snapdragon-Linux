@@ -50,10 +50,15 @@ mkinitcpio \
 # The built-in ath12k driver can probe before the compressed main CPIO is
 # available on this platform.  Keep the WCN7850 reference set in the early
 # uncompressed CPIO and fail the image build if any file is missing there.
-for firmware in amss.bin m3.bin board.bin board-2.bin; do
+for firmware in \
+    ath12k/WCN7850/hw2.0/amss.bin \
+    ath12k/WCN7850/hw2.0/m3.bin \
+    ath12k/WCN7850/hw2.0/board.bin \
+    ath12k/WCN7850/hw2.0/board-2.bin \
+    regulatory.db regulatory.db.p7s; do
     if ! lsinitcpio --early /boot/initramfs-linux.img | grep -Fq \
-        "usr/lib/firmware/ath12k/WCN7850/hw2.0/$firmware"; then
-        printf 'WCN7850 firmware is not in the early initramfs: %s\n' "$firmware" >&2
+        "usr/lib/firmware/$firmware"; then
+        printf 'Required Wi-Fi firmware is not in the early initramfs: %s\n' "$firmware" >&2
         exit 1
     fi
 done
