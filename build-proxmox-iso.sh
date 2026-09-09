@@ -515,52 +515,8 @@ managed=false
 match-device=interface-name:wlan*
 managed=true
 EOF
-	cat >"$root_dir/usr/local/sbin/surface-wifi-start" <<'EOF'
-#!/bin/sh
-# Wait for WCN7850's initial probe, then start the live
-# installer's NetworkManager without relying on systemd or a SysV init script.
-set -u
-
-surface_wifi_present() {
-    for iface in /sys/class/net/*; do
-        [ -d "$iface/wireless" ] && return 0
-    done
-    return 1
-}
-
-for wifi_wait in 1 2 3 4 5 6 7 8 9 10; do
-    surface_wifi_present && break
-    sleep 1
-done
-
-if ! surface_wifi_present; then
-    echo "surface-wifi: WCN7850 did not create a wireless interface" >&2
-    exit 1
-fi
-
-if ! pidof dbus-daemon >/dev/null 2>&1; then
-    if [ -x /etc/init.d/dbus ]; then
-        /etc/init.d/dbus start >/tmp/surface-dbus.log 2>&1 || true
-    else
-        mkdir -p /run/dbus
-        dbus-daemon --system --fork >/tmp/surface-dbus.log 2>&1 || true
-    fi
-fi
-if ! pidof NetworkManager >/dev/null 2>&1; then
-    /usr/sbin/NetworkManager --no-daemon \
-        >/tmp/surface-network-manager.log 2>&1 &
-fi
-for wait_try in 1 2 3 4 5; do
-    nmcli general status >/dev/null 2>&1 && break
-    sleep 1
-done
-if ! nmcli general status >/dev/null 2>&1; then
-    echo "surface-wifi: NetworkManager did not start; see /tmp/surface-network-manager.log" >&2
-    exit 1
-fi
-nmcli radio wifi on >/dev/null 2>&1 || true
-echo "surface-wifi: Wi-Fi is ready; use nmcli device wifi list/connect" >&2
-EOF
+	cp "$ROOT_DIR/initramfs/scripts/surface-wifi-start.sh" \
+		"$root_dir/usr/local/sbin/surface-wifi-start"
 	chmod 0755 "$root_dir/usr/local/sbin/surface-wifi-start"
 	sh -n "$root_dir/usr/local/sbin/surface-wifi-start"
 	python3 "$ROOT_DIR/initramfs/scripts/patch-proxmox-live-wifi.py" \
@@ -639,7 +595,7 @@ verify_proxmox_installer_squashfs() {
 		rm -f -- "$listing"
 		die "live installer Wi-Fi helper does not start NetworkManager directly"
 	}
-	if grep -Eq '/unbind|/drivers_probe' <<<"$helper_text"; then
+	if grep -Fq '/unbind' <<<"$helper_text"; then
 		rm -f -- "$listing"
 		die "live installer must not forcibly rebind the built-in Wi-Fi driver"
 	fi
@@ -694,6 +650,8 @@ patch_proxmox_initrd_lvm() {
 		"$ROOT_DIR/initramfs/scripts/surface-installer-powerctl.sh" >>"$manifest"
 	printf 'surface-installer/init %s 0755\n' \
 		"$ROOT_DIR/initramfs/scripts/surface-installer-init.sh" >>"$manifest"
+	printf 'surface-installer/wifi-start %s 0755\n' \
+		"$ROOT_DIR/initramfs/scripts/surface-wifi-start.sh" >>"$manifest"
 	file "$INSTALLER_BUSYBOX" | grep -Eq 'ARM aarch64.*statically linked' ||
 		die "INSTALLER_BUSYBOX must point to an ARM64 static BusyBox (extract busybox-static:arm64)"
 	printf 'surface-installer/busybox %s 0755\n' "$INSTALLER_BUSYBOX" >>"$manifest"
@@ -758,11 +716,19 @@ verify_proxmox_installer_initrd() {
 		die "initrd is not a Proxmox installer initrd (.cd-info is missing): $initrd"
 	}
 	init_text=$(zstd -q -dc "$initrd" | cpio -i --to-stdout init 2>/dev/null || true)
-	for required in surface-installer/Install.pm surface-installer/SurfaceEFI.pm surface-installer/powerctl surface-installer/init surface-installer/busybox; do
+	for required in surface-installer/Install.pm surface-installer/SurfaceEFI.pm surface-installer/powerctl surface-installer/init surface-installer/busybox surface-installer/wifi-start; do
 		grep -Fxq "$required" "$listing" || die "installer EFI fallback payload is missing: $required"
 	done
 	grep -Fq '/surface-installer/busybox sh /surface-installer/init' <<<"$init_text" ||
 		die "installer handoff does not preserve the PID 1 supervisor"
+	local supervisor_text
+	supervisor_text=$(zstd -q -dc "$initrd" | cpio -i --to-stdout surface-installer/init 2>/dev/null)
+	[[ "$supervisor_text" == "$(cat "$ROOT_DIR/initramfs/scripts/surface-installer-init.sh")" ]] ||
+		die "installer PID 1 supervisor is stale (console handoff must match source)"
+	local wifi_start_text
+	wifi_start_text=$(zstd -q -dc "$initrd" | cpio -i --to-stdout surface-installer/wifi-start 2>/dev/null)
+	[[ "$wifi_start_text" == "$(cat "$ROOT_DIR/initramfs/scripts/surface-wifi-start.sh")" ]] ||
+		die "installer Wi-Fi startup helper is stale"
 	grep -Fq 'cp /surface-installer/Install.pm "$surface_perl_dir/Install.pm"' <<<"$init_text" ||
 		die "installer init does not activate the Surface EFI fallback"
 	if ! grep -Fq 'Proxmox Server Solutions' <<<"$init_text"; then

@@ -144,6 +144,10 @@ kernel panic. Extract `busybox-static:arm64` and set `INSTALLER_BUSYBOX` to its
 `build/installer-busybox/root/bin/busybox`). The builder rejects a dynamic or
 non-ARM64 binary. This contains installer exits; it does not cure a hardware
 reset or a kernel fault independent of PID 1.
+The supervisor explicitly reopens the selected console after `setsid` for
+both the installer and recovery shell. Without this, background startup
+redirects stdin to `/dev/null`, and the installer's `stty size` aborts boot
+before D-Bus and Wi-Fi startup (even if earlier udev warnings are nonfatal).
 
 `--qebspil`/`--qebspil-source` can package the optional Qualcomm DSP pre-boot
 loader. The EFI builder's `--firmware-tree` option copies an additional

@@ -29,9 +29,15 @@ nmcli device wifi list ifname wlan0
 nmcli device wifi connect 'SSID' password 'PASSWORD' ifname wlan0
 ```
 
-`/usr/local/sbin/surface-wifi-start` waits for the wireless interface and starts
-NetworkManager. It does not forcibly detach the built-in PCI driver. If the
-interface is absent, inspect the kernel log and firmware before retrying.
+`/usr/local/sbin/surface-wifi-start` starts NetworkManager before waiting up to
+30 seconds for the wireless interface. The manager stays running on timeout
+so later devices can still be managed. Built-in ath12k can request firmware
+before the external initramfs is unpacked, leaving WCN7850 unbound with
+`amss.bin` error `-2` followed by MHI error `-110`. After the live firmware
+is available, the helper retries only unbound PCI devices with ID
+`17cb:1107`. It never detaches a bound driver. On timeout, PCI device/driver
+information, network interfaces, and the kernel log are saved in
+`/run/proxmox-installer/surface-wifi.log` for diagnosis.
 
 The ISO builder takes the ARM64 Debian packages from an external directory so
 binary packages are not committed to this repository:

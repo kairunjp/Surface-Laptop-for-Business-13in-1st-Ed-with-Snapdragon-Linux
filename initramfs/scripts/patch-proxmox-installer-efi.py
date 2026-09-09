@@ -34,6 +34,12 @@ OVERLAY = OVERLAY_MARKER + '''    echo "installing Surface EFI variable fallback
     cp /surface-installer/busybox /mnt/.installer-mp/surface-installer/busybox || debugsh_err_reboot "cannot install static BusyBox"
     cp /surface-installer/init /mnt/.installer-mp/surface-installer/init || debugsh_err_reboot "cannot install PID 1 supervisor"
     chmod 0755 /mnt/.installer-mp/surface-installer/busybox /mnt/.installer-mp/surface-installer/init
+    # Keep the live helper current when rebuilding an older Surface ISO.
+    if [ -x /mnt/.installer-mp/usr/sbin/NetworkManager ]; then
+        mkdir -p /mnt/.installer-mp/usr/local/sbin
+        cp /surface-installer/wifi-start /mnt/.installer-mp/usr/local/sbin/surface-wifi-start || debugsh_err_reboot "cannot install Wi-Fi startup helper"
+        chmod 0755 /mnt/.installer-mp/usr/local/sbin/surface-wifi-start
+    fi
     echo "installing Surface installer power controls"
     for surface_power_command in poweroff reboot halt; do
         rm -f "/mnt/.installer-mp/sbin/$surface_power_command"
