@@ -279,6 +279,10 @@ stage_profile() {
 	install -d "$PROFILE_DIR" "$ARCHISO_OUT_DIR"
 	cp -a "$ARCHISO_SOURCE_DIR/configs/baseline/." "$PROFILE_DIR/"
 	cp -a "$ROOT_DIR/archlinux/profile/." "$PROFILE_DIR/"
+	# The baseline profile's generic Linux preset runs during package
+	# installation, before customize_airootfs.sh stages the Surface kernel.
+	# Remove it because this image uses the kernel built above instead.
+	rm -f -- "$PROFILE_DIR/airootfs/etc/mkinitcpio.d/linux.preset"
 	profile_pacman_conf="$PROFILE_DIR/pacman.conf"
 	sed -i "s|%ARCHLINUX_MIRROR%|$ARCHLINUX_MIRROR|g" "$profile_pacman_conf"
 
