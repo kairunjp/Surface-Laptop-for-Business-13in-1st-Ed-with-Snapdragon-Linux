@@ -153,11 +153,14 @@ else
 fi
 
 if (( pacstrap_status == 0 )); then
-    stage_surface_firmware || pacstrap_status=$?
+    # Install the package before staging the reference firmware.  The local
+    # package owns board.bin; copying it into the target first makes pacman
+    # reject the package with a file-conflict error.
+    install_surface_kernel_package || pacstrap_status=$?
 fi
 
 if (( pacstrap_status == 0 )); then
-    install_surface_kernel_package || pacstrap_status=$?
+    stage_surface_firmware || pacstrap_status=$?
 fi
 
 if (( pacstrap_status == 0 )); then
