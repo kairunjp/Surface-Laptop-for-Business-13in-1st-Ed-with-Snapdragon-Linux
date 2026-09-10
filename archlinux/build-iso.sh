@@ -337,6 +337,12 @@ stage_profile() {
 	rm -f -- "$PROFILE_DIR/airootfs/etc/mkinitcpio.d/linux.preset"
 	profile_pacman_conf="$PROFILE_DIR/pacman.conf"
 	sed -i "s|%ARCHLINUX_MIRROR%|$ARCHLINUX_MIRROR|g" "$profile_pacman_conf"
+	# mkarchiso uses profile_pacman_conf while assembling the image, but the
+	# resulting live root otherwise keeps Arch Linux ARM's geo-selected
+	# mirrorlist.  Keep archinstall/pacstrap on the same validated mirror used
+	# for the build so one slow regional mirror cannot abort installation.
+	install -D -m 0644 "$profile_pacman_conf" \
+		"$PROFILE_DIR/airootfs/etc/pacman.conf"
 
 	install -d \
 		"$PROFILE_DIR/airootfs/usr/lib/surface-laptop-13" \
