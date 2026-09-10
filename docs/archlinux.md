@@ -96,11 +96,10 @@ is an unsigned development image; disable Secure Boot before booting it.
 
 The ISO is a live environment, not an unattended disk installer. Log in as
 `root` at the console and use the included `archinstall` command. The live
-environment deliberately leaves NetworkManager stopped so archinstall can
-own `wpa_supplicant` and scan/select Wi-Fi networks without a `FAIL-BUSY`
-conflict. NetworkManager remains installed for the target system; it can be
-started manually in the live environment with `systemctl start NetworkManager`
-when needed.
+environment leaves NetworkManager stopped until the Wi-Fi menu needs it. The
+image patches archinstall's Wi-Fi handler to start NetworkManager and connect
+with `nmcli`, which avoids the `wpa_supplicant` connection race on the WCN7850.
+NetworkManager remains installed for the target system.
 
 The live image also prepares the Arch Linux ARM PGP keyring. Because archinstall
 uses `pacstrap -K`, the image's `pacstrap` wrapper initializes each new target

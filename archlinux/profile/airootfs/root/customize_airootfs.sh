@@ -118,6 +118,233 @@ PY
 
 patch_archinstall_kernel_menu
 
+patch_archinstall_wifi_handler() {
+    local wifi_handler
+    wifi_handler=$(find /usr/lib -type f \
+        -path '*/site-packages/archinstall/lib/network/wifi_handler.py' \
+        -print -quit)
+    [[ -n "$wifi_handler" && -f "$wifi_handler" ]] || {
+        printf 'archinstall Wi-Fi handler is missing\n' >&2
+        return 1
+    }
+
+    # The upstream handler scans through wpa_cli and then tries to connect by
+    # editing wpa_supplicant.conf. NetworkManager already owns the working
+    # WCN7850 setup on this image, so hand the selected SSID and password to
+    # NetworkManager instead of competing with its wpa_supplicant instance.
+    python3 - "$wifi_handler" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text()
+
+
+def replace_method(source: str, method: str, next_method: str, replacement: str) -> str:
+    pattern = re.compile(
+        rf'(?ms)^\t(?:async )?def {re.escape(method)}\b.*?'
+        rf'(?=^\t(?:async )?def {re.escape(next_method)}\b)'
+    )
+    # Use a replacement function so backslashes in the generated Python
+    # source (the nmcli escaped-field parser) are not interpreted by re.sub.
+    updated, count = pattern.subn(lambda _match: replacement, source, count=1)
+    if count != 1:
+        raise SystemExit(f'{method} was not found in {path}')
+    return updated
+
+
+enable_network_manager = '''\
+\tasync def _enable_network_manager(self, wifi_iface: str) -> bool:
+\t\tdebug('Ensuring NetworkManager is ready for Wi-Fi')
+
+\t\ttry:
+\t\t\tSysCommand(['systemctl', 'start', 'NetworkManager.service'])
+\t\t\tSysCommand(['/usr/bin/nmcli', 'radio', 'wifi', 'on'])
+\t\t\tSysCommand(['/usr/bin/nmcli', 'device', 'set', wifi_iface, 'managed', 'yes'])
+\t\texcept SysCallError as err:
+\t\t\tdebug(f'failed to enable NetworkManager Wi-Fi: {err}')
+\t\t\treturn False
+
+\t\treturn True
+
+'''
+
+setup_wifi = '''\
+\tasync def _setup_wifi(self, wifi_iface: str) -> bool:
+\t\tdebug('Setting up wifi')
+
+\t\tif not await self._enable_network_manager(wifi_iface):
+\t\t\tdebug('Failed to enable NetworkManager')
+\t\t\treturn False
+
+\t\tif not wifi_iface:
+\t\t\tdebug('No wifi interface found')
+\t\t\tawait NotifyScreen(header=tr('No wifi interface found')).run()
+\t\t\treturn False
+
+\t\tdebug(f'Found wifi interface: {wifi_iface}')
+
+\t\twifi_networks = await self._scan_wifi(wifi_iface)
+
+\t\tif not wifi_networks:
+\t\t\tdebug('No networks found')
+\t\t\tawait NotifyScreen(header=tr('No wifi networks found')).run()
+\t\t\ttui.exit(Result.false())
+\t\t\treturn False
+
+\t\titems = [MenuItem(network.ssid, value=network) for network in wifi_networks]
+
+\t\tresult = await TableSelectionScreen[WifiNetwork](
+\t\t\theader=tr('Select wifi network to connect to'),
+\t\t\tgroup=MenuItemGroup(items),
+\t\t\tallow_skip=True,
+\t\t\tallow_reset=True,
+\t\t).run()
+
+\t\tmatch result.type_:
+\t\t\tcase ResultType.Selection:
+\t\t\t\tnetwork = result.get_value()
+\t\t\tcase ResultType.Skip | ResultType.Reset:
+\t\t\t\ttui.exit(Result.false())
+\t\t\t\treturn False
+\t\t\tcase _:
+\t\t\t\tassert_never(result.type_)
+
+\t\tpsk = await self._prompt_psk()
+
+\t\tif not psk:
+\t\t\tdebug('No password specified')
+\t\t\treturn False
+
+\t\tif not self._connect_network_manager(wifi_iface, network.ssid, psk):
+\t\t\tdebug('Failed to connect with NetworkManager')
+\t\t\tawait self._notify_failure()
+\t\t\treturn False
+
+\t\tawait LoadingScreen(timer=5, header='Connecting wifi...').run()
+
+\t\treturn True
+
+\tdef _connect_network_manager(self, wifi_iface: str, ssid: str, psk: str) -> bool:
+\t\tdebug(f'Connecting to Wi-Fi network through NetworkManager: {ssid}')
+
+\t\ttry:
+\t\t\tSysCommand([
+\t\t\t\t'/usr/bin/nmcli',
+\t\t\t\t'--wait',
+\t\t\t\t'60',
+\t\t\t\t'device',
+\t\t\t\t'wifi',
+\t\t\t\t'connect',
+\t\t\t\tssid,
+\t\t\t\t'password',
+\t\t\t\tpsk,
+\t\t\t\t'ifname',
+\t\t\t\twifi_iface,
+\t\t\t])
+\t\texcept SysCallError as err:
+\t\t\tdebug(f'NetworkManager failed to connect to Wi-Fi: {err}')
+\t\t\treturn False
+
+\t\treturn True
+
+'''
+
+scan_wifi = '''\
+\tasync def _scan_wifi(self, wifi_iface: str) -> list[WifiNetwork]:
+\t\tdebug('Scanning Wifi networks through NetworkManager')
+
+\t\ttry:
+\t\t\ttry:
+\t\t\t\tSysCommand([
+\t\t\t\t\t'/usr/bin/nmcli',
+\t\t\t\t\t'device',
+\t\t\t\t\t'wifi',
+\t\t\t\t\t'rescan',
+\t\t\t\t\t'ifname',
+\t\t\t\t\twifi_iface,
+\t\t\t\t])
+\t\t\texcept SysCallError as err:
+\t\t\t\t# A scan can already be in progress; the list command below
+\t\t\t\t# still returns the most recent results in that case.
+\t\t\t\tdebug(f'NetworkManager Wi-Fi rescan request failed: {err}')
+
+\t\t\tawait LoadingScreen(timer=5, header=tr('Scanning wifi networks...')).run()
+\t\t\tresult = SysCommand([
+\t\t\t\t'/usr/bin/nmcli',
+\t\t\t\t'-t',
+\t\t\t\t'-e',
+\t\t\t\t'yes',
+\t\t\t\t'-f',
+\t\t\t\t'BSSID,FREQ,SIGNAL,SECURITY,SSID',
+\t\t\t\t'device',
+\t\t\t\t'wifi',
+\t\t\t\t'list',
+\t\t\t\t'ifname',
+\t\t\t\twifi_iface,
+\t\t\t])
+\t\texcept SysCallError as err:
+\t\t\tdebug(f'Failed to retrieve Wi-Fi networks from NetworkManager: {err}')
+\t\t\treturn []
+
+\t\tnetworks = []
+\t\tfor line in result.decode().splitlines():
+\t\t\tparts = self._split_nmcli_row(line)
+\t\t\tif len(parts) != 5 or not parts[0]:
+\t\t\t\tcontinue
+
+\t\t\tnetworks.append(
+\t\t\t\tWifiNetwork(
+\t\t\t\t\tbssid=parts[0],
+\t\t\t\t\tfrequency=parts[1].removesuffix(' MHz'),
+\t\t\t\t\tsignal_level=parts[2],
+\t\t\t\t\tflags=parts[3],
+\t\t\t\t\tssid=parts[4],
+\t\t\t\t)
+\t\t\t)
+
+\t\treturn networks
+
+\tdef _split_nmcli_row(self, line: str) -> list[str]:
+\t\tfields = []
+\t\tfield = []
+\t\tescaped = False
+
+\t\tfor character in line:
+\t\t\tif escaped:
+\t\t\t\tfield.append(character)
+\t\t\t\tescaped = False
+\t\t\telif character == '\\\\':
+\t\t\t\tescaped = True
+\t\t\telif character == ':':
+\t\t\t\tfields.append(''.join(field))
+\t\t\t\tfield = []
+\t\t\telse:
+\t\t\t\tfield.append(character)
+
+\t\tif escaped:
+\t\t\tfield.append('\\\\')
+\t\tfields.append(''.join(field))
+\t\treturn fields
+
+'''
+
+text = replace_method(text, '_enable_supplicant', '_find_wifi_interface', enable_network_manager)
+text = replace_method(text, '_setup_wifi', '_scan_wifi', setup_wifi)
+text = replace_method(text, '_scan_wifi', '_notify_failure', scan_wifi)
+compile(text, str(path), 'exec')
+path.write_text(text)
+PY
+    python3 -m py_compile "$wifi_handler"
+    grep -Fq "async def _enable_network_manager" "$wifi_handler"
+    grep -Fq "def _connect_network_manager" "$wifi_handler"
+    grep -Fq "async def _scan_wifi" "$wifi_handler"
+    grep -Fq "'/usr/bin/nmcli'" "$wifi_handler"
+}
+
+patch_archinstall_wifi_handler
+
 # Arch Linux ARM's package signing key is officially shipped by
 # archlinuxarm-keyring, but its old certifications can remain at unknown or
 # marginal trust with current GnuPG. Keep signature verification enabled and
@@ -147,8 +374,7 @@ fi
 install -D -m 0755 /usr/local/libexec/archlinuxarm-pacstrap \
     /usr/bin/pacstrap
 
-# Leave NetworkManager stopped in the live environment.  archinstall owns
-# wpa_supplicant while its Wi-Fi menu scans for networks; starting
-# NetworkManager here makes its wpa_cli scan fail with FAIL-BUSY.  The
-# NetworkManager package remains available for the installed system.
+# Leave NetworkManager stopped until the archinstall Wi-Fi menu needs it.
+# The patched handler starts NetworkManager and uses nmcli for the selected
+# network, matching the connection method that works on this hardware.
 systemctl enable surface-wifi-reprobe.service
