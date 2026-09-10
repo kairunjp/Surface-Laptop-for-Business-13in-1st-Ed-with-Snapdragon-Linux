@@ -31,6 +31,8 @@ ARCHISO_OUT_DIR="$SHARED_DIR/out"
 KERNEL_SOURCE_DIR="$SHARED_DIR/linux"
 SURFACE_OUTPUT_DIR="$SHARED_DIR/surface"
 SURFACE_WORK_DIR="$SHARED_DIR/surface-work"
+SURFACE_PACKAGE_DIR="$SHARED_DIR/surface-kernel-package"
+SURFACE_PACKAGE_NAME=linux-surface-laptop-13
 ROOTFS_ARCHIVE="$BUILD_DIR/ArchLinuxARM-aarch64-latest.tar.gz"
 ROOTFS_MD5_FILE="$BUILD_DIR/ArchLinuxARM-aarch64-latest.tar.gz.md5"
 FIRMWARE_DIR="$SHARED_DIR/firmware"
@@ -327,12 +329,130 @@ build_no_dsp_dtbs() {
 	done
 }
 
+build_surface_kernel_package() {
+	local kernel_release module_tree package_root package_version package_file
+	kernel_release=$(tr -d '\n' <"$SURFACE_WORK_DIR/kernel/release")
+	module_tree="$SURFACE_WORK_DIR/modules/lib/modules/$kernel_release"
+	package_root="$SURFACE_PACKAGE_DIR/root"
+	# Pacman package versions cannot contain the hyphens used by the kernel
+	# localversion. Keep the actual release in the module directory and use a
+	# reversible, package-safe version for the local package filename.
+	package_version=$(printf '%s' "$kernel_release" | tr '+-' '._')
+	[[ "$kernel_release" == *surface-laptop-13* ]] ||
+		die "Surface kernel release is not tagged with surface-laptop-13"
+	[[ -f "$SURFACE_WORK_DIR/kernel/Image" ]] || die "Surface kernel Image is missing"
+	[[ -d "$module_tree" ]] || die "Surface kernel modules are missing"
+	[[ -s "$FIRMWARE_DIR/ath12k/WCN7850/hw2.0/board.bin" ]] ||
+		die "the Surface WCN7850 board.bin is missing"
+
+	log "Building the linux-surface-laptop-13 target package"
+	rm -rf -- "$SURFACE_PACKAGE_DIR"
+	install -d \
+		"$package_root/boot" \
+		"$package_root/etc/kernel" \
+		"$package_root/etc/mkinitcpio.d" \
+		"$package_root/etc/mkinitcpio.conf.d" \
+		"$package_root/usr/lib/firmware/ath12k/WCN7850/hw2.0" \
+		"$package_root/usr/lib/modules"
+	install -m 0644 "$SURFACE_WORK_DIR/kernel/Image" \
+		"$package_root/boot/vmlinuz-linux-surface-laptop-13"
+	install -m 0644 "$SURFACE_WORK_DIR/dtb/surface-laptop-13-archlinux.dtb" \
+		"$package_root/boot/surface-laptop-13.dtb"
+	# linux-firmware already supplies amss.bin, m3.bin, and board-2.bin on
+	# Arch Linux ARM. board.bin is the Surface-specific file absent there, so
+	# keep only it in this package and refresh the complete reference set in
+	# the pacstrap wrapper after the repository transaction.
+	install -m 0644 "$FIRMWARE_DIR/ath12k/WCN7850/hw2.0/board.bin" \
+		"$package_root/usr/lib/firmware/ath12k/WCN7850/hw2.0/board.bin"
+	cp -a "$module_tree" "$package_root/usr/lib/modules/"
+	local link
+	for link in build source; do
+		if [[ -L "$package_root/usr/lib/modules/$kernel_release/$link" ]]; then
+			rm -f -- "$package_root/usr/lib/modules/$kernel_release/$link"
+		fi
+	done
+	printf '%s\n' "$SURFACE_PACKAGE_NAME" \
+		>"$package_root/usr/lib/modules/$kernel_release/pkgbase"
+	rm -f -- "$package_root/usr/lib/modules/$kernel_release/vmlinuz"
+	ln -s /boot/vmlinuz-linux-surface-laptop-13 \
+		"$package_root/usr/lib/modules/$kernel_release/vmlinuz"
+
+	cat >"$package_root/etc/mkinitcpio.d/$SURFACE_PACKAGE_NAME.preset" <<EOF
+ALL_config="/etc/mkinitcpio.conf"
+ALL_kver="/boot/vmlinuz-linux-surface-laptop-13"
+
+PRESETS=('default')
+
+default_image="/boot/initramfs-linux-surface-laptop-13.img"
+# archinstall activates this UKI entry and adjusts it for the ESP mountpoint.
+#default_uki="/boot/EFI/Linux/arch-linux-surface-laptop-13.efi"
+# The DTB is placed in the UKI by ukify through this explicit config file.
+#default_options="--cmdline /etc/kernel/cmdline --ukiconfig /etc/kernel/uki.conf"
+EOF
+	cat >"$package_root/etc/kernel/uki.conf" <<'EOF'
+[UKI]
+DeviceTree=/boot/surface-laptop-13.dtb
+EOF
+	cat >"$package_root/etc/mkinitcpio.conf.d/surface-laptop-13.conf" <<'EOF'
+# Keep the Surface Wi-Fi and Bluetooth firmware in every target initramfs.
+FILES+=(
+  /lib/firmware/ath12k/WCN7850/hw2.0/amss.bin
+  /lib/firmware/ath12k/WCN7850/hw2.0/m3.bin
+  /lib/firmware/ath12k/WCN7850/hw2.0/board.bin
+  /lib/firmware/ath12k/WCN7850/hw2.0/board-2.bin
+  /lib/firmware/qca/hmtbtfw20.tlv
+  /lib/firmware/qca/hmtnv20.b10f
+  /lib/firmware/qca/hmtnv20.b112
+  /lib/firmware/qca/hmtnv20.bin
+  /lib/firmware/regulatory.db
+  /lib/firmware/regulatory.db.p7s
+)
+EOF
+	cat >"$SURFACE_PACKAGE_DIR/PKGBUILD" <<EOF
+pkgname=$SURFACE_PACKAGE_NAME
+pkgver=$package_version
+pkgrel=1
+pkgdesc='Surface Laptop 13 custom Linux kernel, modules, DTB, and boot preset'
+arch=('aarch64')
+license=('GPL-2.0-only')
+depends=('mkinitcpio' 'systemd' 'wireless-regdb')
+provides=('linux')
+
+package() {
+  cp -a /workspace/surface-kernel-package/root/. "\$pkgdir/"
+}
+EOF
+
+	# modules_install creates most metadata, but regenerate it against the
+	# package's /usr tree so depmod never records paths into the workspace.
+	mount_chroot_filesystems
+	run_chroot depmod -b /workspace/surface-kernel-package/root/usr "$kernel_release"
+	if ! run_chroot id surface-builder >/dev/null 2>&1; then
+		run_chroot useradd --system --user-group --create-home --home-dir /home/surface-builder \
+			--shell /usr/bin/nologin surface-builder
+	fi
+	run_chroot chown -R surface-builder:surface-builder /workspace/surface-kernel-package
+	run_chroot runuser -u surface-builder -- sh -c \
+		'cd /workspace/surface-kernel-package && HOME=/home/surface-builder makepkg --nodeps --nocheck --noconfirm --cleanbuild --force'
+	cleanup_mounts
+
+	package_file=$(find "$SURFACE_PACKAGE_DIR" -maxdepth 1 -type f \
+		-name "$SURFACE_PACKAGE_NAME-*.pkg.tar.*" ! -name '*.sig' -print -quit)
+	[[ -n "$package_file" && -f "$package_file" ]] ||
+		die "linux-surface-laptop-13 package was not created"
+	printf 'target kernel package: %s\n' "${package_file##*/}"
+}
+
 stage_profile() {
-	local kernel_release module_tree profile_pacman_conf relative
+	local kernel_release module_tree profile_pacman_conf relative surface_package
 	kernel_release=$(tr -d '\n' <"$SURFACE_WORK_DIR/kernel/release")
 	module_tree="$SURFACE_WORK_DIR/modules/lib/modules/$kernel_release"
 	[[ -f "$SURFACE_WORK_DIR/kernel/Image" ]] || die "Surface kernel Image is missing"
 	[[ -d "$module_tree" ]] || die "Surface kernel modules are missing"
+	surface_package=$(find "$SURFACE_PACKAGE_DIR" -maxdepth 1 -type f \
+		-name "$SURFACE_PACKAGE_NAME-*.pkg.tar.*" ! -name '*.sig' -print -quit)
+	[[ -n "$surface_package" && -f "$surface_package" ]] ||
+		die "Surface target kernel package is missing"
 
 	log "Assembling the AArch64 archiso profile"
 	install -d "$PROFILE_DIR" "$ARCHISO_OUT_DIR"
@@ -359,6 +479,8 @@ stage_profile() {
 		"$PROFILE_DIR/grub"
 	cp "$SURFACE_WORK_DIR/kernel/Image" \
 		"$PROFILE_DIR/airootfs/usr/lib/surface-laptop-13/Image"
+	install -m 0644 "$surface_package" \
+		"$PROFILE_DIR/airootfs/usr/lib/surface-laptop-13/$(basename "$surface_package")"
 	cp -a "$module_tree" "$PROFILE_DIR/airootfs/usr/lib/modules/"
 	for link in build source; do
 		if [[ -L "$PROFILE_DIR/airootfs/usr/lib/modules/$kernel_release/$link" ]]; then
@@ -386,7 +508,8 @@ trim_build_inputs() {
 	# stage_profile has copied everything mkarchiso needs into PROFILE_DIR. Keep
 	# only the bootstrap chroot, archiso source, profile, and archiso work/output
 	# directories for the final image build; GitHub's ARM runner has limited disk.
-	rm -rf -- "$KERNEL_SOURCE_DIR" "$SURFACE_OUTPUT_DIR" "$SURFACE_WORK_DIR" "$FIRMWARE_DIR"
+	rm -rf -- "$KERNEL_SOURCE_DIR" "$SURFACE_OUTPUT_DIR" "$SURFACE_WORK_DIR" \
+		"$SURFACE_PACKAGE_DIR" "$FIRMWARE_DIR"
 	rm -f -- "$BUILD_DIR"/linux-*.tar.gz "$BUILD_DIR/surface-no-dsp.dtbo" \
 		"$ROOTFS_ARCHIVE" "$ROOTFS_MD5_FILE"
 }
@@ -448,6 +571,7 @@ main() {
 	download_kernel
 	build_surface_kernel_and_dtb
 	build_no_dsp_dtbs
+	build_surface_kernel_package
 	stage_profile
 	trim_build_inputs
 	build_iso

@@ -2,6 +2,7 @@
 set -Eeuo pipefail
 
 real_pacstrap=/usr/lib/surface-laptop-13/pacstrap.real
+surface_firmware_root=/usr/lib/firmware
 archlinuxarm_build_key=68B3537F39A313B3E574D06777193F152BDBE6A6
 target_root=
 skip_next=
@@ -47,12 +48,74 @@ if [[ -n "$target_root" && -d "$target_root" ]]; then
     /usr/bin/pacman-key --gpgdir "$target_gpgdir" --lsign-key "$archlinuxarm_build_key"
 fi
 
+pacstrap_args=()
+surface_kernel_requested=0
+for argument in "$@"; do
+    if [[ "$argument" == linux-surface-laptop-13 ]]; then
+        surface_kernel_requested=1
+    else
+        pacstrap_args+=("$argument")
+    fi
+done
+
+surface_kernel_package=
+if (( surface_kernel_requested )); then
+    surface_kernel_package=$(find /usr/lib/surface-laptop-13 -maxdepth 1 -type f \
+        -name 'linux-surface-laptop-13-*.pkg.tar.*' ! -name '*.sig' -print -quit)
+    [[ -n "$surface_kernel_package" && -f "$surface_kernel_package" ]] || {
+        printf 'archlinuxarm-pacstrap: bundled Surface kernel package is missing\n' >&2
+        exit 1
+    }
+    # The local package is installed with pacman -U below. Install its repo
+    # dependency through pacstrap first, since pacman -U checks but does not
+    # resolve dependencies from the sync databases.
+    pacstrap_args+=(wireless-regdb)
+fi
+
+stage_surface_firmware() {
+    local relative source destination
+    [[ -n "$target_root" ]] || return 0
+    for relative in \
+        ath12k/WCN7850/hw2.0/amss.bin \
+        ath12k/WCN7850/hw2.0/m3.bin \
+        ath12k/WCN7850/hw2.0/board.bin \
+        ath12k/WCN7850/hw2.0/board-2.bin \
+        qca/hmtbtfw20.tlv \
+        qca/hmtnv20.b10f \
+        qca/hmtnv20.b112 \
+        qca/hmtnv20.bin \
+        regulatory.db regulatory.db.p7s; do
+        source="$surface_firmware_root/$relative"
+        [[ -s "$source" ]] || {
+            printf 'archlinuxarm-pacstrap: live firmware is missing: %s\n' "$relative" >&2
+            return 1
+        }
+        destination="$target_root/usr/lib/firmware/$relative"
+        install -D -m 0644 "$source" "$destination"
+    done
+}
+
+install_surface_kernel_package() {
+    (( surface_kernel_requested )) || return 0
+    /usr/bin/pacman \
+        --root "$target_root" \
+        --dbpath "$target_root/var/lib/pacman" \
+        --cachedir "$target_root/var/cache/pacman/pkg" \
+        --config /etc/pacman.conf \
+        --noconfirm \
+        -U "$surface_kernel_package"
+}
+
 ensure_archinstall_kernel_preset() {
     local preset_dir source_preset
 
     [[ -n "$target_root" ]] || return 0
     preset_dir="$target_root/etc/mkinitcpio.d"
     [[ -d "$preset_dir" && ! -e "$preset_dir/linux.preset" ]] || return 0
+
+    # The Surface preset is named after the custom package and already
+    # contains the UKI settings archinstall needs.
+    [[ -e "$preset_dir/linux-surface-laptop-13.preset" ]] && return 0
 
     # Arch Linux ARM names the preset after the package name
     # (linux-aarch64.preset), while archinstall's default kernel entry is
@@ -83,10 +146,18 @@ ensure_archinstall_kernel_preset() {
 }
 
 pacstrap_status=0
-if "$real_pacstrap" "$@"; then
+if "$real_pacstrap" "${pacstrap_args[@]}"; then
     pacstrap_status=0
 else
     pacstrap_status=$?
+fi
+
+if (( pacstrap_status == 0 )); then
+    stage_surface_firmware || pacstrap_status=$?
+fi
+
+if (( pacstrap_status == 0 )); then
+    install_surface_kernel_package || pacstrap_status=$?
 fi
 
 if (( pacstrap_status == 0 )); then

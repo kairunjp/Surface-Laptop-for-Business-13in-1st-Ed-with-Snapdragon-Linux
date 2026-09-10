@@ -118,3 +118,18 @@ archinstall's default `linux` entry expects `linux.preset` when UKI boot is
 selected. The live `pacstrap` wrapper creates that compatibility preset after
 the kernel package is installed, preserving the ARM kernel version and
 initramfs settings while adding the UKI output entries expected by archinstall.
+
+## Installed kernel
+
+The ISO also carries a local `linux-surface-laptop-13` package. It contains
+the same Surface kernel image and modules used by the live environment, the
+no-DSP Surface DTB, and a mkinitcpio preset for a Surface UKI. The live
+archinstall package is patched at image-build time so `Kernels` includes
+`linux-surface-laptop-13` and selects it by default. The pacstrap wrapper
+replaces that package name with the bundled local package, then copies the
+validated Wi-Fi/Bluetooth firmware into the new root.
+
+When systemd-boot UKI mode is selected, archinstall generates
+`arch-linux-surface-laptop-13.efi` with `/boot/surface-laptop-13.dtb` embedded
+through `/etc/kernel/uki.conf`. The installed system therefore boots the
+Surface kernel rather than falling back to the generic Arch Linux ARM kernel.

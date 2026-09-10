@@ -3,9 +3,15 @@ set -Eeuo pipefail
 
 surface_root=/usr/lib/surface-laptop-13
 surface_image="$surface_root/Image"
+surface_kernel_package=$(find "$surface_root" -maxdepth 1 -type f \
+    -name 'linux-surface-laptop-13-*.pkg.tar.*' ! -name '*.sig' -print -quit)
 archlinuxarm_build_key=68B3537F39A313B3E574D06777193F152BDBE6A6
 [[ -f "$surface_image" ]] || {
     printf 'missing Surface kernel: %s\n' "$surface_image" >&2
+    exit 1
+}
+[[ -n "$surface_kernel_package" && -f "$surface_kernel_package" ]] || {
+    printf 'missing target Surface kernel package in %s\n' "$surface_root" >&2
     exit 1
 }
 
@@ -63,6 +69,54 @@ for firmware in \
         exit 1
     fi
 done
+
+patch_archinstall_kernel_menu() {
+    local package_types
+    package_types=$(find /usr/lib -type f \
+        -path '*/site-packages/archinstall/lib/models/package_types.py' \
+        -print -quit)
+    [[ -n "$package_types" && -f "$package_types" ]] || {
+        printf 'archinstall package type definitions are missing\n' >&2
+        return 1
+    }
+
+    # archinstall gets its kernel choices from this enum. Patch the installed
+    # package after pacman has installed it so the custom local package is
+    # visible in the Kernels menu and selected by default.
+    python3 - "$package_types" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text()
+enum_entry = "SURFACE = 'linux-surface-laptop-13'"
+if enum_entry not in text:
+    marker = 'class Kernel(StrEnum):\n'
+    match = re.search(r'^class Kernel\(StrEnum\):\n([ \t]+)\w+', text, re.MULTILINE)
+    if marker not in text or not match:
+        raise SystemExit('Kernel enum was not found')
+    indent = match.group(1)
+    text = text.replace(marker, marker + indent + enum_entry + '\n', 1)
+
+text, replacements = re.subn(
+    r'(DEFAULT_KERNEL(?:\s*:\s*[^=]+)?\s*=\s*)Kernel\.\w+',
+    r'\1Kernel.SURFACE',
+    text,
+    count=1,
+)
+if replacements != 1:
+    raise SystemExit('DEFAULT_KERNEL was not found')
+
+compile(text, str(path), 'exec')
+path.write_text(text)
+PY
+    python3 -m py_compile "$package_types"
+    grep -Fq "SURFACE = 'linux-surface-laptop-13'" "$package_types"
+    grep -Eq 'DEFAULT_KERNEL([^=]|[[:space:]])*=[[:space:]]*Kernel\.SURFACE' "$package_types"
+}
+
+patch_archinstall_kernel_menu
 
 # Arch Linux ARM's package signing key is officially shipped by
 # archlinuxarm-keyring, but its old certifications can remain at unknown or
