@@ -3,6 +3,7 @@ set -Eeuo pipefail
 
 surface_root=/usr/lib/surface-laptop-13
 surface_image="$surface_root/Image"
+archlinuxarm_build_key=68B3537F39A313B3E574D06777193F152BDBE6A6
 [[ -f "$surface_image" ]] || {
     printf 'missing Surface kernel: %s\n' "$surface_image" >&2
     exit 1
@@ -62,6 +63,35 @@ for firmware in \
         exit 1
     fi
 done
+
+# Arch Linux ARM's package signing key is officially shipped by
+# archlinuxarm-keyring, but its old certifications can remain at unknown or
+# marginal trust with current GnuPG. Keep signature verification enabled and
+# locally sign only the imported official build key. This keyring is used by
+# both live pacman and the pacstrap wrapper below.
+install -d -m 700 /etc/pacman.d/gnupg
+pacman-key --init
+if ! grep -Fqx allow-weak-key-signatures /etc/pacman.d/gnupg/gpg.conf 2>/dev/null; then
+    printf '%s\n' allow-weak-key-signatures >> /etc/pacman.d/gnupg/gpg.conf
+fi
+pacman-key --populate archlinuxarm
+pacman-key --lsign-key "$archlinuxarm_build_key"
+
+# archinstall invokes pacstrap with -K, which intentionally creates an empty
+# target keyring. That is correct for a normal Arch ISO but leaves the Arch
+# Linux ARM build key untrusted before archlinuxarm-keyring can be installed.
+# Seed a fresh target keyring with the official ARM keys before the real
+# pacstrap starts; package signatures remain Required throughout installation.
+pacstrap_real="$surface_root/pacstrap.real"
+if [[ -x /usr/bin/pacstrap && ! -e "$pacstrap_real" ]]; then
+    mv /usr/bin/pacstrap "$pacstrap_real"
+fi
+[[ -x "$pacstrap_real" ]] || {
+    printf 'missing pacstrap implementation: %s\n' "$pacstrap_real" >&2
+    exit 1
+}
+install -D -m 0755 /usr/local/libexec/archlinuxarm-pacstrap \
+    /usr/bin/pacstrap
 
 # Leave NetworkManager stopped in the live environment.  archinstall owns
 # wpa_supplicant while its Wi-Fi menu scans for networks; starting

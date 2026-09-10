@@ -18,6 +18,11 @@ WCN7850_FIRMWARE_URL=${WCN7850_FIRMWARE_URL:-}
 SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-$(date +%s)}
 DEFAULT_WCN7850_FIRMWARE_SOURCE="$ROOT_DIR/build/archlinux-reference/surface-pve-wifi-reference.tar.gz"
 
+# Arch Linux ARM currently signs packages with this key. The keyring package
+# carries its historical certifications as marginal trust, so explicitly
+# locally sign the verified package key after importing the official keyring.
+ARCHLINUXARM_BUILD_KEY=68B3537F39A313B3E574D06777193F152BDBE6A6
+
 ROOTFS_DIR="$BUILD_DIR/rootfs"
 SHARED_DIR="$BUILD_DIR/shared"
 ARCHISO_SOURCE_DIR="$SHARED_DIR/archiso-source"
@@ -163,8 +168,10 @@ install_archiso_build_dependencies() {
 	run_chroot sh -c \
 		'printf "%s\\n" allow-weak-key-signatures >> /etc/pacman.d/gnupg/gpg.conf'
 	run_chroot pacman-key --populate archlinuxarm
+	run_chroot pacman-key --lsign-key "$ARCHLINUXARM_BUILD_KEY"
 	run_chroot pacman -Sy --noconfirm archlinuxarm-keyring
 	run_chroot pacman-key --populate archlinuxarm
+	run_chroot pacman-key --lsign-key "$ARCHLINUXARM_BUILD_KEY"
 	run_chroot pacman -Syu --noconfirm
 	run_chroot pacman -S --needed --noconfirm \
 		arch-install-scripts \

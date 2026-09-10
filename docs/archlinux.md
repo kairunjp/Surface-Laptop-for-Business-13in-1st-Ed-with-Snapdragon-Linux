@@ -20,8 +20,9 @@ locked in `kernel/source.lock`, and obtains Bluetooth firmware from the pinned
 linux-firmware revision. Wi-Fi uses the exact files from the working
 `surface-pve` boot initramfs, validated against `drivers/firmware-manifest.json`.
 Both the live root and the early initramfs receive that same Wi-Fi set. The
-builder also handles the legacy Arch Linux ARM key certification required by
-newer GnuPG versions without disabling package signature verification.
+builder also imports the official Arch Linux ARM keyring, locally signs its
+package-build key to account for the key's legacy certification, and keeps
+package signature verification enabled.
 
 CI uses the checked-in archive
 `build/archlinux-reference/surface-pve-wifi-reference.tar.gz` by default. A
@@ -100,6 +101,13 @@ own `wpa_supplicant` and scan/select Wi-Fi networks without a `FAIL-BUSY`
 conflict. NetworkManager remains installed for the target system; it can be
 started manually in the live environment with `systemctl start NetworkManager`
 when needed.
+
+The live image also prepares the Arch Linux ARM PGP keyring. Because archinstall
+uses `pacstrap -K`, the image's `pacstrap` wrapper initializes each new target
+with the official ARM keyring and locally trusts the official build key before
+the first package is downloaded. The installed system therefore remains on
+`SigLevel = Required DatabaseOptional` for both installation and later
+`pacman -Syu`; package signature checks are not disabled.
 
 The image also enables `surface-wifi-reprobe.service`. It retries the WCN7850
 PCI probe after the live root and its firmware are available, covering boots

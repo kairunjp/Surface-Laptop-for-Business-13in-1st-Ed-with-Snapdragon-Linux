@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+real_pacstrap=/usr/lib/surface-laptop-13/pacstrap.real
+archlinuxarm_build_key=68B3537F39A313B3E574D06777193F152BDBE6A6
+target_root=
+skip_next=
+after_options=
+
+# Find pacstrap's root argument while preserving every original argument for
+# the real script. archinstall currently uses: -C /etc/pacman.conf -K /mnt.
+for argument in "$@"; do
+    if [[ -n "$skip_next" ]]; then
+        skip_next=
+        continue
+    fi
+    if [[ -n "$after_options" ]]; then
+        target_root=$argument
+        break
+    fi
+    case "$argument" in
+        -C|--config)
+            skip_next=1
+            ;;
+        -C/*|--config=*)
+            ;;
+        --)
+            after_options=1
+            ;;
+        -*)
+            ;;
+        *)
+            target_root=$argument
+            break
+            ;;
+    esac
+done
+
+if [[ -n "$target_root" && -d "$target_root" ]]; then
+    target_gpgdir="$target_root/etc/pacman.d/gnupg"
+    install -d -m 700 "$target_gpgdir"
+    if ! grep -Fqx allow-weak-key-signatures "$target_gpgdir/gpg.conf" 2>/dev/null; then
+        printf '%s\n' allow-weak-key-signatures >> "$target_gpgdir/gpg.conf"
+    fi
+    /usr/bin/pacman-key --gpgdir "$target_gpgdir" --init
+    /usr/bin/pacman-key --gpgdir "$target_gpgdir" --populate archlinuxarm
+    /usr/bin/pacman-key --gpgdir "$target_gpgdir" --lsign-key "$archlinuxarm_build_key"
+fi
+
+exec "$real_pacstrap" "$@"

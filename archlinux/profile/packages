@@ -1,4 +1,5 @@
 base
+archlinuxarm-keyring
 arch-install-scripts
 archinstall
 mkinitcpio
