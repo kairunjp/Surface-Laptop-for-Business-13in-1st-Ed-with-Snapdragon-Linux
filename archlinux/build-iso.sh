@@ -29,6 +29,7 @@ SURFACE_WORK_DIR="$SHARED_DIR/surface-work"
 ROOTFS_ARCHIVE="$BUILD_DIR/ArchLinuxARM-aarch64-latest.tar.gz"
 ROOTFS_MD5_FILE="$BUILD_DIR/ArchLinuxARM-aarch64-latest.tar.gz.md5"
 FIRMWARE_DIR="$SHARED_DIR/firmware"
+KERNEL_BUILTIN_FIRMWARE_DIR="$SHARED_DIR/kernel-firmware"
 
 DEFAULT_LINUX_FIRMWARE_REVISION=e981caea6ed33c48d25b7dbf473327dbd01df163
 declare -A FIRMWARE_SHA256=(
@@ -230,11 +231,32 @@ download_kernel() {
 }
 
 build_surface_kernel_and_dtb() {
+	local relative source
+	log "Staging firmware for the built-in early Wi-Fi loader"
+	rm -rf -- "$KERNEL_BUILTIN_FIRMWARE_DIR"
+	install -d "$KERNEL_BUILTIN_FIRMWARE_DIR"
+	for relative in \
+		ath12k/WCN7850/hw2.0/amss.bin \
+		ath12k/WCN7850/hw2.0/m3.bin \
+		ath12k/WCN7850/hw2.0/board.bin \
+		ath12k/WCN7850/hw2.0/board-2.bin; do
+		source="$FIRMWARE_DIR/$relative"
+		[[ -s "$source" ]] || die "WCN7850 firmware is missing before kernel build: $relative"
+		install -D -m 0644 "$source" "$KERNEL_BUILTIN_FIRMWARE_DIR/$relative"
+	done
+	for relative in regulatory.db regulatory.db.p7s; do
+		source="$ROOTFS_DIR/usr/lib/firmware/$relative"
+		[[ -s "$source" ]] || die "regulatory firmware is missing before kernel build: $relative"
+		install -D -m 0644 "$source" "$KERNEL_BUILTIN_FIRMWARE_DIR/$relative"
+	done
+
 	log "Building the Surface ARM64 kernel"
 	env \
 		KERNEL_SOURCE="$KERNEL_SOURCE_DIR" \
 		KERNEL_CROSS_COMPILE= \
 		KERNEL_APPLY_PATCHES=1 \
+		KERNEL_EXTRA_FIRMWARE='ath12k/WCN7850/hw2.0/amss.bin ath12k/WCN7850/hw2.0/m3.bin ath12k/WCN7850/hw2.0/board.bin ath12k/WCN7850/hw2.0/board-2.bin regulatory.db regulatory.db.p7s' \
+		KERNEL_EXTRA_FIRMWARE_DIR="$KERNEL_BUILTIN_FIRMWARE_DIR" \
 		SURFACE_OUTPUT_DIR="$SURFACE_OUTPUT_DIR" \
 		SURFACE_WORK_DIR="$SURFACE_WORK_DIR" \
 		SOURCE_DATE_EPOCH="$SOURCE_DATE_EPOCH" \

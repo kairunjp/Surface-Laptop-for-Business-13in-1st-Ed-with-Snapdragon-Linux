@@ -46,6 +46,8 @@ FIRMWARE_SOURCE=${FIRMWARE_SOURCE:-}
 WCN7850_FIRMWARE_SOURCE=${WCN7850_FIRMWARE_SOURCE:-}
 KERNEL_CONFIG=${KERNEL_CONFIG:-$PUBLIC_DIR/kernel/config/base.config}
 KERNEL_CONFIG_FRAGMENT=${KERNEL_CONFIG_FRAGMENT:-$PUBLIC_DIR/kernel/config/desktop.config}
+KERNEL_EXTRA_FIRMWARE=${KERNEL_EXTRA_FIRMWARE:-}
+KERNEL_EXTRA_FIRMWARE_DIR=${KERNEL_EXTRA_FIRMWARE_DIR:-}
 BASE_DTS=${BASE_DTS:-$PUBLIC_DIR/device-tree/base/surface-laptop-13-typec.dts}
 BASE_DTB_INPUT=${BASE_DTB_INPUT:-$PUBLIC_DIR/device-tree/base/surface-laptop-13-typec.dtb}
 EL2_DTS=${EL2_DTS:-$PUBLIC_DIR/device-tree/overlays/x1e-el2.dtso}
@@ -184,6 +186,38 @@ merge_kernel_config() {
 	fi
 }
 
+configure_kernel_extra_firmware() {
+	[[ -n "$KERNEL_EXTRA_FIRMWARE" ]] || return 0
+	[[ -n "$KERNEL_EXTRA_FIRMWARE_DIR" ]] ||
+		die "KERNEL_EXTRA_FIRMWARE_DIR is required when built-in firmware is configured"
+	[[ -d "$KERNEL_EXTRA_FIRMWARE_DIR" ]] ||
+		die "built-in firmware directory not found: $KERNEL_EXTRA_FIRMWARE_DIR"
+
+	local firmware
+	for firmware in $KERNEL_EXTRA_FIRMWARE; do
+		[[ -s "$KERNEL_EXTRA_FIRMWARE_DIR/$firmware" ]] ||
+			die "built-in firmware is missing: $KERNEL_EXTRA_FIRMWARE_DIR/$firmware"
+	done
+
+	# The public base config deliberately leaves EXTRA_FIRMWARE empty. Replace
+	# it here with the device-specific, validated input supplied by the caller.
+	sed -i \
+		-e '/^CONFIG_EXTRA_FIRMWARE=/d' \
+		-e '/^CONFIG_EXTRA_FIRMWARE_DIR=/d' \
+		"$KERNEL_OUT/.config"
+	printf 'CONFIG_EXTRA_FIRMWARE="%s"\n' "$KERNEL_EXTRA_FIRMWARE" >>"$KERNEL_OUT/.config"
+	printf 'CONFIG_EXTRA_FIRMWARE_DIR="%s"\n' "$KERNEL_EXTRA_FIRMWARE_DIR" >>"$KERNEL_OUT/.config"
+}
+
+verify_kernel_extra_firmware() {
+	[[ -n "$KERNEL_EXTRA_FIRMWARE" ]] || return 0
+	local firmware
+	grep -Fqx "CONFIG_EXTRA_FIRMWARE=\"$KERNEL_EXTRA_FIRMWARE\"" \
+		"$KERNEL_OUT/.config" || die "kernel did not retain CONFIG_EXTRA_FIRMWARE"
+	grep -Fqx "CONFIG_EXTRA_FIRMWARE_DIR=\"$KERNEL_EXTRA_FIRMWARE_DIR\"" \
+		"$KERNEL_OUT/.config" || die "kernel did not retain CONFIG_EXTRA_FIRMWARE_DIR"
+}
+
 check_kernel_features() {
 	local config_file="$1"
 	local symbol
@@ -200,6 +234,7 @@ check_kernel_features() {
 
 build_kernel() {
 	need make
+	need strings
 	if [[ -n "$KERNEL_CROSS_COMPILE" ]]; then
 		need "${KERNEL_CROSS_COMPILE}gcc"
 	else
@@ -233,6 +268,7 @@ build_kernel() {
 	mkdir -p "$KERNEL_OUT" "$MODULE_OUT"
 	cp "$KERNEL_CONFIG" "$KERNEL_OUT/.config"
 	merge_kernel_config
+	configure_kernel_extra_firmware
 	make -C "$KERNEL_WORK_SOURCE" O="$KERNEL_OUT" ARCH=arm64 CROSS_COMPILE="$KERNEL_CROSS_COMPILE" olddefconfig
 	if grep -q '^CONFIG_LOCALVERSION=' "$KERNEL_OUT/.config"; then
 		sed -i -E 's#^CONFIG_LOCALVERSION=.*#CONFIG_LOCALVERSION="-surface-laptop-13"#' "$KERNEL_OUT/.config"
@@ -249,8 +285,15 @@ if grep -q '^CONFIG_LOCALVERSION_AUTO=' "$KERNEL_OUT/.config"; then
 	# Re-run configuration after optional source patches; no private distro
 	# settings are added here.
 	make -C "$KERNEL_WORK_SOURCE" O="$KERNEL_OUT" ARCH=arm64 CROSS_COMPILE="$KERNEL_CROSS_COMPILE" olddefconfig
+	verify_kernel_extra_firmware
 	log "Building ARM64 kernel and modules"
 	make -C "$KERNEL_WORK_SOURCE" O="$KERNEL_OUT" -j"$KERNEL_JOBS" ARCH=arm64 CROSS_COMPILE="$KERNEL_CROSS_COMPILE" Image modules
+	if [[ -n "$KERNEL_EXTRA_FIRMWARE" ]]; then
+		for firmware in $KERNEL_EXTRA_FIRMWARE; do
+			strings "$KERNEL_OUT/vmlinux" | grep -Fqx "$firmware" ||
+				die "built-in firmware name is absent from vmlinux: $firmware"
+		done
+	fi
 	make -C "$KERNEL_WORK_SOURCE" O="$KERNEL_OUT" ARCH=arm64 CROSS_COMPILE="$KERNEL_CROSS_COMPILE" INSTALL_MOD_PATH="$MODULE_OUT" modules_install
 	local krel
 	krel=$(make -s -C "$KERNEL_WORK_SOURCE" O="$KERNEL_OUT" ARCH=arm64 CROSS_COMPILE="$KERNEL_CROSS_COMPILE" kernelrelease)

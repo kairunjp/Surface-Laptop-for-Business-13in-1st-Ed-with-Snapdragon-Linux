@@ -32,6 +32,11 @@ The builder checks every file's size and SHA-256 before building the kernel.
 Missing or mismatched reference inputs fail the build; it does not substitute
 another board's calibration.
 
+The WCN7850 and regulatory blobs are also embedded into the Arch kernel with
+`CONFIG_EXTRA_FIRMWARE`. The device's built-in ath12k/MHI probe can run before
+the live root's filesystem firmware path is usable, so the initramfs copy is
+kept as a second source and the kernel copy is the early-boot source.
+
 ## Local build
 
 The builder must run as root on an AArch64 Linux host because it creates a
