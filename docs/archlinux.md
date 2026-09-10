@@ -94,9 +94,12 @@ uses the reference set above; Bluetooth uses downloaded QCA firmware. The output
 is an unsigned development image; disable Secure Boot before booting it.
 
 The ISO is a live environment, not an unattended disk installer. Log in as
-`root` at the console and use the normal Arch installation tools or the
-included `archinstall` command after bringing up networking with
-NetworkManager/iwd.
+`root` at the console and use the included `archinstall` command. The live
+environment deliberately leaves NetworkManager stopped so archinstall can
+own `wpa_supplicant` and scan/select Wi-Fi networks without a `FAIL-BUSY`
+conflict. NetworkManager remains installed for the target system; it can be
+started manually in the live environment with `systemctl start NetworkManager`
+when needed.
 
 The image also enables `surface-wifi-reprobe.service`. It retries the WCN7850
 PCI probe after the live root and its firmware are available, covering boots

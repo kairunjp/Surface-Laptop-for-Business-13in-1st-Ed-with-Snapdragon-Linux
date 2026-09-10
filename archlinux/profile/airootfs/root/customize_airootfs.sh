@@ -63,4 +63,8 @@ for firmware in \
     fi
 done
 
-systemctl enable NetworkManager.service surface-wifi-reprobe.service
+# Leave NetworkManager stopped in the live environment.  archinstall owns
+# wpa_supplicant while its Wi-Fi menu scans for networks; starting
+# NetworkManager here makes its wpa_cli scan fail with FAIL-BUSY.  The
+# NetworkManager package remains available for the installed system.
+systemctl enable surface-wifi-reprobe.service
