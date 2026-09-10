@@ -47,4 +47,42 @@ if [[ -n "$target_root" && -d "$target_root" ]]; then
     /usr/bin/pacman-key --gpgdir "$target_gpgdir" --lsign-key "$archlinuxarm_build_key"
 fi
 
-exec "$real_pacstrap" "$@"
+ensure_archinstall_kernel_preset() {
+    local preset_dir source_preset
+
+    [[ -n "$target_root" ]] || return 0
+    preset_dir="$target_root/etc/mkinitcpio.d"
+    [[ -d "$preset_dir" && ! -e "$preset_dir/linux.preset" ]] || return 0
+
+    # Arch Linux ARM names the preset after the package name
+    # (linux-aarch64.preset), while archinstall's default kernel entry is
+    # still named linux and therefore looks for linux.preset when configuring
+    # UKIs. Keep the ARM preset contents, including ALL_kver, unchanged.
+    source_preset="$preset_dir/linux-aarch64.preset"
+    if [[ ! -f "$source_preset" ]]; then
+        source_preset=$(find "$preset_dir" -maxdepth 1 -type f \
+            -name 'linux-*.preset' -print | sort | head -n1)
+    fi
+    if [[ -z "$source_preset" || ! -f "$source_preset" ]]; then
+        printf 'archlinuxarm-pacstrap: no Arch Linux ARM kernel preset found in %s\n' \
+            "$preset_dir" >&2
+        return 1
+    fi
+
+    cp -p -- "$source_preset" "$preset_dir/linux.preset"
+    printf 'archlinuxarm-pacstrap: created %s from %s for archinstall\n' \
+        "$preset_dir/linux.preset" "${source_preset##*/}" >&2
+}
+
+pacstrap_status=0
+if "$real_pacstrap" "$@"; then
+    pacstrap_status=0
+else
+    pacstrap_status=$?
+fi
+
+if (( pacstrap_status == 0 )); then
+    ensure_archinstall_kernel_preset || pacstrap_status=$?
+fi
+
+exit "$pacstrap_status"
