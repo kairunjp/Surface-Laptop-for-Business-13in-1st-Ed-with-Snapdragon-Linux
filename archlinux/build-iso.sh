@@ -183,6 +183,7 @@ install_archiso_build_dependencies() {
 		pacman \
 		rsync \
 		squashfs-tools \
+		wireless-regdb \
 		xz \
 		zstd
 	# The bootstrap rootfs is only the build host.  Its package cache is not
