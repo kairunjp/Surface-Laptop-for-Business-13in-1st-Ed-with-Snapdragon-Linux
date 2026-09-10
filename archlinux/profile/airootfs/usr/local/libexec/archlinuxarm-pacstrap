@@ -67,9 +67,10 @@ if (( surface_kernel_requested )); then
         exit 1
     }
     # The local package is installed with pacman -U below. Install its repo
-    # dependency through pacstrap first, since pacman -U checks but does not
-    # resolve dependencies from the sync databases.
-    pacstrap_args+=(wireless-regdb)
+    # dependencies through pacstrap first, since pacman -U checks but does not
+    # resolve dependencies from the sync databases. systemd-ukify is required
+    # by mkinitcpio to embed the Surface DTB in the installed UKI.
+    pacstrap_args+=(systemd-ukify wireless-regdb)
 fi
 
 stage_surface_firmware() {

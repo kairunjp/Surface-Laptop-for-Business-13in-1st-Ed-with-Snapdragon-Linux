@@ -385,7 +385,9 @@ PRESETS=('default')
 
 default_image="/boot/initramfs-linux-surface-laptop-13.img"
 # archinstall activates this UKI entry and adjusts it for the ESP mountpoint.
-#default_uki="/boot/EFI/Linux/arch-linux-surface-laptop-13.efi"
+# Keep the default rooted at /efi; archinstall rewrites it to /boot when
+# the ESP is mounted there.
+#default_uki="/efi/EFI/Linux/arch-linux-surface-laptop-13.efi"
 # The DTB is placed in the UKI by ukify through this explicit config file.
 #default_options="--cmdline /etc/kernel/cmdline --ukiconfig /etc/kernel/uki.conf"
 EOF
@@ -415,7 +417,7 @@ pkgrel=1
 pkgdesc='Surface Laptop 13 custom Linux kernel, modules, DTB, and boot preset'
 arch=('aarch64')
 license=('GPL-2.0-only')
-depends=('mkinitcpio' 'systemd' 'wireless-regdb')
+depends=('mkinitcpio' 'systemd' 'systemd-ukify' 'wireless-regdb')
 provides=('linux')
 
 package() {
