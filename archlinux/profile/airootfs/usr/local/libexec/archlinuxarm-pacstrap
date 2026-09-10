@@ -70,6 +70,14 @@ ensure_archinstall_kernel_preset() {
     fi
 
     cp -p -- "$source_preset" "$preset_dir/linux.preset"
+    if ! grep -Eq '^#?default_uki=' "$preset_dir/linux.preset"; then
+        printf '%s\n' \
+            '' \
+            '# Added for archinstall UKI boot mode. archinstall adjusts this' \
+            '# path to the actual ESP mountpoint before invoking mkinitcpio.' \
+            '#default_uki="/efi/EFI/Linux/arch-linux.efi"' \
+            '#default_options=""' >> "$preset_dir/linux.preset"
+    fi
     printf 'archlinuxarm-pacstrap: created %s from %s for archinstall\n' \
         "$preset_dir/linux.preset" "${source_preset##*/}" >&2
 }

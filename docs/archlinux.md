@@ -117,4 +117,4 @@ Arch Linux ARM installs its kernel preset as `linux-aarch64.preset`, whereas
 archinstall's default `linux` entry expects `linux.preset` when UKI boot is
 selected. The live `pacstrap` wrapper creates that compatibility preset after
 the kernel package is installed, preserving the ARM kernel version and
-initramfs settings.
+initramfs settings while adding the UKI output entries expected by archinstall.
