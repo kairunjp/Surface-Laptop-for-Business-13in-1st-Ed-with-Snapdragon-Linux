@@ -17,3 +17,9 @@ files originate from linux-firmware. Their hashes are recorded in
 `drivers/firmware-manifest.json`. Check the vendor terms before redistribution.
 Bluetooth firmware is fetched separately from the pinned linux-firmware
 revision. Check the vendor terms before redistribution.
+
+The Surface ADSP/CDSP firmware required by the main-branch EL1 device tree for
+PMIC GLINK battery and charger communication is committed under
+`archlinux/firmware-tree/`. Its sizes and SHA-256 hashes are recorded in
+`drivers/firmware-manifest.json`. Check the applicable vendor terms before
+redistributing these device-specific binaries.

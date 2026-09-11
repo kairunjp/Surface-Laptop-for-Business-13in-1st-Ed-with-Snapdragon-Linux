@@ -119,9 +119,8 @@ stage_surface_firmware() {
         install -D -m 0644 "$source" "$destination"
     done
 
-    # The DSP firmware is an optional private build input.  Its manifest is
-    # present only when the live ISO was built with the main-branch,
-    # battery-capable DTB, so the normal no-DSP ISO does not require it.
+    # The DSP firmware manifest is included with every battery-capable ISO and
+    # is copied before the local Surface kernel package builds its initramfs.
     if [[ -f /usr/lib/surface-laptop-13/dsp-firmware.list ]]; then
         while read -r checksum relative; do
             [[ -n "$checksum" && -n "$relative" ]] || continue

@@ -22,11 +22,6 @@ on:
         description: 'Optional HTTPS URL of a validated Surface Laptop 13 Adreno GPU firmware tar.gz'
         required: false
         type: string
-      dsp_firmware_url:
-        description: 'Optional HTTPS URL of the private Surface ADSP/CDSP firmware tar.gz for battery support'
-        required: false
-        type: string
-
 permissions:
   contents: read
 
@@ -46,10 +41,6 @@ jobs:
       # Use the checked-in, model-specific archive for push builds. Only an
       # explicit manual input may replace it, avoiding stale repository URLs.
       GPU_FIRMWARE_URL: ${{ inputs.gpu_firmware_url }}
-      # Set the DSP_FIRMWARE_URL secret (preferred), repository variable, or
-      # manual input to build the main-branch DSP-enabled DTB. Otherwise keep
-      # no-DSP mode.
-      DSP_FIRMWARE_URL: ${{ inputs.dsp_firmware_url || secrets.DSP_FIRMWARE_URL || vars.DSP_FIRMWARE_URL }}
 
     steps:
       - name: Check out source
@@ -68,7 +59,7 @@ jobs:
           sudo env \
             WCN7850_FIRMWARE_URL="$WCN7850_FIRMWARE_URL" \
             GPU_FIRMWARE_URL="$GPU_FIRMWARE_URL" \
-            DSP_FIRMWARE_URL="$DSP_FIRMWARE_URL" \
+            DSP_FIRMWARE_SOURCE="$GITHUB_WORKSPACE/archlinux/firmware-tree" \
             ARCHLINUX_BUILD_DIR="$RUNNER_TEMP/surface-archlinux-build" \
             ARCHLINUX_OUTPUT_DIR="$GITHUB_WORKSPACE/build/archlinux" \
             KERNEL_CROSS_COMPILE= \
@@ -97,11 +88,7 @@ jobs:
           dtb="$RUNNER_TEMP/surface-laptop-13-archlinux.dtb"
           xorriso -osirrox on -indev "$iso" \
             -extract /boot/grub/surface-laptop-13-archlinux.dtb "$dtb"
-          if [[ -n "$DSP_FIRMWARE_URL" ]]; then
-            expected=okay
-          else
-            expected=disabled
-          fi
+          expected=okay
           for node in /soc@0/remoteproc@6800000 /soc@0/remoteproc@32300000; do
             test "$(fdtget "$dtb" "$node" status)" = "$expected"
           done

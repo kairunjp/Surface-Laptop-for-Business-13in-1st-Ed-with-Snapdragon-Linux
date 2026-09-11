@@ -69,29 +69,24 @@ sudo ./archlinux/build-iso.sh
 ```
 
 The scratch directory must have several GiB free; set
-`ARCHLINUX_BUILD_DIR` and `ARCHLINUX_OUTPUT_DIR` to change its locations. By
-default, the ISO uses the safe no-DSP DTB because the Surface DSP firmware is
-not redistributed by this repository, so audio is intentionally disabled in
-this live image. Secure Boot may need to be disabled because the development
-kernel and GRUB payload are unsigned.
+`ARCHLINUX_BUILD_DIR` and `ARCHLINUX_OUTPUT_DIR` to change its locations. The
+ISO uses the main-branch DSP-enabled DTB by default, so the Qualcomm PMIC GLINK
+battery/charger service is available. The four required DSP files are kept in
+`archlinux/firmware-tree/`, validated against
+`drivers/firmware-manifest.json`, and copied into the live root, installed
+target, and early initramfs. Secure Boot may need to be disabled because the
+development kernel and GRUB payload are unsigned.
 
-To build the battery-capable image, provide the private Surface DSP firmware
-tree used by the main-branch EL1 DTB:
+To use a different extracted DSP firmware tree for a local build, override the
+default explicitly:
 
 ```sh
-sudo env DSP_FIRMWARE_SOURCE="$PWD/build/firmware-tree" \
+sudo env DSP_FIRMWARE_SOURCE=/path/to/firmware-tree \
   ./archlinux/build-iso.sh
 ```
 
-The tree must contain the four files named by the DTB under
-`qcom/x1p42100/Microsoft/Surface12/`. The builder then uses the main-branch
-DSP-enabled DTB and copies those files into the live root, installed target,
-and early initramfs. The files are not stored in Git; omit the variable to
-retain the safe no-DSP image.
-
-The GitHub Actions workflow accepts the same archive through the manual
-`dsp_firmware_url` input, the `DSP_FIRMWARE_URL` Actions Secret (preferred),
-or the repository variable of the same name.
+GitHub Actions uses the committed tree automatically; no DSP URL or manual
+input is required.
 
 
 ## Boot files
@@ -335,8 +330,9 @@ Fingerprint userspace setup (libfprint patch, fprintd) is documented in
 ## Firmware note
 
 Qualcomm firmware files are listed with SHA256 hashes in
-`drivers/firmware-manifest.json`. This repo does not ship them - check your
-redistribution rights before publishing binaries.
+`drivers/firmware-manifest.json`. This repository includes the Surface
+ADSP/CDSP files required for battery communication; check your redistribution
+rights before publishing or mirroring the binaries.
 
 ### Live Surface boot comparison (2026-09-07)
 

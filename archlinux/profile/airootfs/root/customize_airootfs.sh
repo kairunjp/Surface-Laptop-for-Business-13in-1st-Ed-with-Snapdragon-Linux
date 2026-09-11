@@ -52,8 +52,8 @@ for firmware in \
 done
 
 # The battery-capable DTB boots the Surface ADSP/CDSP through remoteproc.
-# Validate the optional private firmware set before mkinitcpio creates the
-# live initramfs; the list is absent on the safe no-DSP image.
+# Validate the staged firmware set before mkinitcpio creates the live
+# initramfs.
 if [[ -f "$surface_root/dsp-firmware.list" ]]; then
     while read -r checksum relative; do
         [[ -n "$checksum" && -n "$relative" ]] || continue

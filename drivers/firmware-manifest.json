@@ -8,6 +8,22 @@
       "bytes": 67348,
       "sha256": "eee95622aa1e487e96de55469a65c5642ce9b8c724f9da768c79fe54df760eff"
     },
+    "qcom/x1p42100/Microsoft/Surface12/adsp_dtbs.elf": {
+      "bytes": 73528,
+      "sha256": "c4c01f79cdd5311dda9b624e61ee78367381b158f210f0e586ed746e1753694d"
+    },
+    "qcom/x1p42100/Microsoft/Surface12/cdsp_dtbs.elf": {
+      "bytes": 40760,
+      "sha256": "93941f040da14b8305d39579686d886706d22954a538b03da676c1aaa191797f"
+    },
+    "qcom/x1p42100/Microsoft/Surface12/qcadsp8380.mbn": {
+      "bytes": 21940664,
+      "sha256": "0d58cc85d9afa24a0693afb1174ab011df00d9a45fadab8dddd3b624a69318a1"
+    },
+    "qcom/x1p42100/Microsoft/Surface12/qccdsp8380.mbn": {
+      "bytes": 3195304,
+      "sha256": "4a67a03367f2eff2f8a0e867ca25d2bf2fcd5aee3e41e2c9f436c804e257c789"
+    },
     "qcom/x1p42100/Microsoft/SurfaceLaptop13/qcdxkmsucpurwa.mbn": {
       "bytes": 12088,
       "sha256": "de957e0a25c2a42f417f8e95ccf1cbdfeed5a4a6d77a84e215389b8b78fc8bf4"
@@ -77,6 +93,6 @@
       "sha256": "facca00c7cbc988d843776f8b8f8f7926f24007a1cfc540d2219a005f596114f"
     }
   },
-  "note": "The WCN7850 Wi-Fi files in build/archlinux-reference/surface-pve-wifi-reference.tar.gz are validated reference inputs copied from surface-pve. The GPU set in build/archlinux-reference/surface-laptop13-gpu-reference.tar.gz combines gen71500 firmware from linux-firmware with the device-specific qcdxkmsucpurwa.mbn extracted from Microsoft's SurfaceLaptop_13in_1st_Edition_Win11_26100_26.080.5528.0.msi. Verify these hashes before changing them. Bluetooth files remain downloaded from the pinned linux-firmware revision by the builders.",
+  "note": "The WCN7850 Wi-Fi files in build/archlinux-reference/surface-pve-wifi-reference.tar.gz are validated reference inputs copied from surface-pve. The GPU set in build/archlinux-reference/surface-laptop13-gpu-reference.tar.gz combines gen71500 firmware from linux-firmware with the device-specific qcdxkmsucpurwa.mbn extracted from Microsoft's SurfaceLaptop_13in_1st_Edition_Win11_26100_26.080.5528.0.msi. The Surface ADSP/CDSP set under archlinux/firmware-tree is required by the main-branch EL1 DTB for battery/charger communication. Verify all hashes and vendor redistribution terms before changing or publishing these files. Bluetooth files remain downloaded from the pinned linux-firmware revision by the builders.",
   "schema": 1
 }
