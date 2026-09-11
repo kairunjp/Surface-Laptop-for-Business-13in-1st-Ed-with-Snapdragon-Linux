@@ -221,7 +221,7 @@ verify_kernel_extra_firmware() {
 check_kernel_features() {
 	local config_file="$1"
 	local symbol
-	for symbol in CIFS WIREGUARD; do
+	for symbol in CIFS WIREGUARD ZRAM ZRAM_BACKEND_ZSTD ZRAM_DEF_COMP_ZSTD; do
 		grep -Eq "^CONFIG_${symbol}=(y|m)$" "$config_file" \
 			|| die "required kernel feature is disabled: CONFIG_${symbol}"
 	done
