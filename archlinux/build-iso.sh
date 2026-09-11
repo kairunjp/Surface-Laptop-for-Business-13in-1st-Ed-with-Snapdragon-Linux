@@ -17,6 +17,13 @@ WCN7850_FIRMWARE_SOURCE=${WCN7850_FIRMWARE_SOURCE:-}
 WCN7850_FIRMWARE_URL=${WCN7850_FIRMWARE_URL:-}
 GPU_FIRMWARE_SOURCE=${GPU_FIRMWARE_SOURCE:-}
 GPU_FIRMWARE_URL=${GPU_FIRMWARE_URL:-}
+# The main-branch EL1 DTB enables the Surface ADSP/CDSP path used by the
+# Qualcomm PMIC GLINK battery service.  These device-specific files are not
+# redistributed by the repository; when supplied, the Arch image uses that
+# DTB and stages the files in the live root, target root, and early initramfs.
+DSP_FIRMWARE_SOURCE=${DSP_FIRMWARE_SOURCE:-}
+DSP_FIRMWARE_URL=${DSP_FIRMWARE_URL:-}
+DSP_FIRMWARE_ENABLED=0
 SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-$(date +%s)}
 DEFAULT_WCN7850_FIRMWARE_SOURCE="$ROOT_DIR/build/archlinux-reference/surface-pve-wifi-reference.tar.gz"
 DEFAULT_GPU_FIRMWARE_SOURCE="$ROOT_DIR/build/archlinux-reference/surface-laptop13-gpu-reference.tar.gz"
@@ -61,6 +68,13 @@ GPU_FIRMWARE_FILES=(
 	qcom/x1p42100/Microsoft/SurfaceLaptop13/qcdxkmsucpurwa.mbn
 )
 
+DSP_FIRMWARE_FILES=(
+	qcom/x1p42100/Microsoft/Surface12/qcadsp8380.mbn
+	qcom/x1p42100/Microsoft/Surface12/adsp_dtbs.elf
+	qcom/x1p42100/Microsoft/Surface12/qccdsp8380.mbn
+	qcom/x1p42100/Microsoft/Surface12/cdsp_dtbs.elf
+)
+
 MOUNTS=()
 
 die() {
@@ -87,6 +101,7 @@ absolute_path() {
 
 BUILD_DIR=$(absolute_path "$BUILD_DIR")
 OUTPUT_DIR=$(absolute_path "$OUTPUT_DIR")
+DSP_FIRMWARE_ARCHIVE="$BUILD_DIR/surface-dsp-firmware.tar.gz"
 
 cleanup_mounts() {
 	local index
@@ -332,6 +347,18 @@ download_firmware() {
 	[[ -n "$gpu_source" ]] || die "GPU firmware reference source is not configured"
 	python3 "$ROOT_DIR/archlinux/prepare-gpu-firmware.py" "$gpu_source" \
 		--output "$FIRMWARE_DIR"
+	if (( DSP_FIRMWARE_ENABLED )); then
+		log "Staging the Surface DSP/remoteproc firmware for the battery service"
+		if [[ -n "$DSP_FIRMWARE_URL" ]]; then
+			curl --proto '=https' --proto-redir '=https' -fL --retry 5 \
+				--max-filesize 67108864 "$DSP_FIRMWARE_URL" -o "$DSP_FIRMWARE_ARCHIVE"
+			python3 "$ROOT_DIR/archlinux/prepare-dsp-firmware.py" \
+				"$DSP_FIRMWARE_ARCHIVE" --output "$FIRMWARE_DIR"
+		else
+			python3 "$ROOT_DIR/archlinux/prepare-dsp-firmware.py" \
+				"$DSP_FIRMWARE_SOURCE" --output "$FIRMWARE_DIR"
+		fi
+	fi
 	log "Downloading pinned Bluetooth firmware"
 	for relative in "${!FIRMWARE_SHA256[@]}"; do
 		destination="$FIRMWARE_DIR/$relative"
@@ -345,32 +372,50 @@ download_firmware() {
 	done
 }
 
-build_no_dsp_dtbs() {
+build_archlinux_dtbs() {
 	local overlay current bluetooth
-	overlay="$BUILD_DIR/surface-no-dsp.dtbo"
 	current="$SURFACE_WORK_DIR/dtb/surface-laptop-13-current.dtb"
 	bluetooth="$SURFACE_WORK_DIR/dtb/surface-laptop-13-bluetooth.dtb"
-	log "Applying the safe no-DSP overlay to the Arch Linux boot DTBs"
-	dtc -@ -I dts -O dtb -o "$overlay" \
-		"$ROOT_DIR/device-tree/overlays/experimental/x1p-el2-no-dsp.dtso"
-	fdtoverlay -i "$current" \
-		-o "$SURFACE_WORK_DIR/dtb/surface-laptop-13-archlinux.dtb" "$overlay"
-	fdtoverlay -i "$bluetooth" \
-		-o "$SURFACE_WORK_DIR/dtb/surface-laptop-13-archlinux-bluetooth.dtb" "$overlay"
+	if (( DSP_FIRMWARE_ENABLED )); then
+		# build.sh already produces the full EL1 DTB used by the main branch.
+		# The Arch image used to apply x1p-el2-no-dsp.dtso unconditionally, which
+		# removed the ADSP/PMIC GLINK transport and left qcom_battmgr in -EAGAIN.
+		log "Using the main-branch DSP-enabled DTB for battery communication"
+		cp -- "$current" \
+			"$SURFACE_WORK_DIR/dtb/surface-laptop-13-archlinux.dtb"
+		cp -- "$bluetooth" \
+			"$SURFACE_WORK_DIR/dtb/surface-laptop-13-archlinux-bluetooth.dtb"
+	else
+		local overlay="$BUILD_DIR/surface-no-dsp.dtbo"
+		log "Applying the safe no-DSP overlay to the Arch Linux boot DTBs"
+		dtc -@ -I dts -O dtb -o "$overlay" \
+			"$ROOT_DIR/device-tree/overlays/experimental/x1p-el2-no-dsp.dtso"
+		fdtoverlay -i "$current" \
+			-o "$SURFACE_WORK_DIR/dtb/surface-laptop-13-archlinux.dtb" "$overlay"
+		fdtoverlay -i "$bluetooth" \
+			-o "$SURFACE_WORK_DIR/dtb/surface-laptop-13-archlinux-bluetooth.dtb" "$overlay"
+	fi
 	for current in \
 		"$SURFACE_WORK_DIR/dtb/surface-laptop-13-archlinux.dtb" \
 		"$SURFACE_WORK_DIR/dtb/surface-laptop-13-archlinux-bluetooth.dtb"; do
-		for node in /soc@0/remoteproc@6800000 /soc@0/remoteproc@32300000 /sound; do
-			[[ "$(fdtget "$current" "$node" status)" == disabled ]] ||
-				die "no-DSP DTB did not disable $node: $current"
-		done
+		if (( DSP_FIRMWARE_ENABLED )); then
+			for node in /soc@0/remoteproc@6800000 /soc@0/remoteproc@32300000; do
+				[[ "$(fdtget "$current" "$node" status)" == okay ]] ||
+					die "DSP-enabled DTB did not enable $node: $current"
+			done
+		else
+			for node in /soc@0/remoteproc@6800000 /soc@0/remoteproc@32300000 /sound; do
+				[[ "$(fdtget "$current" "$node" status)" == disabled ]] ||
+					die "no-DSP DTB did not disable $node: $current"
+			done
+		fi
 		fdtget "$current" /soc@0/gpu@3d00000/zap-shader firmware-name >/dev/null ||
-			die "no-DSP DTB lost the Surface GPU zap-shader firmware node: $current"
+			die "Arch DTB lost the Surface GPU zap-shader firmware node: $current"
 	done
 }
 
 build_surface_kernel_package() {
-	local kernel_release module_tree package_root package_version package_file
+	local kernel_release module_tree package_root package_version package_file relative checksum
 	kernel_release=$(tr -d '\n' <"$SURFACE_WORK_DIR/kernel/release")
 	module_tree="$SURFACE_WORK_DIR/modules/lib/modules/$kernel_release"
 	package_root="$SURFACE_PACKAGE_DIR/root"
@@ -453,6 +498,15 @@ FILES+=(
   /lib/firmware/regulatory.db.p7s
 )
 EOF
+	if (( DSP_FIRMWARE_ENABLED )); then
+		{
+			printf 'FILES+=(\n'
+			for relative in "${DSP_FIRMWARE_FILES[@]}"; do
+				printf '  /lib/firmware/%s\n' "$relative"
+			done
+			printf ')\n'
+		} >>"$package_root/etc/mkinitcpio.conf.d/surface-laptop-13.conf"
+	fi
 	cat >"$SURFACE_PACKAGE_DIR/PKGBUILD" <<EOF
 pkgname=$SURFACE_PACKAGE_NAME
 pkgver=$package_version
@@ -544,7 +598,7 @@ EOF
 }
 
 stage_profile() {
-	local kernel_release module_tree profile_pacman_conf relative surface_package dms_greeter_package
+	local kernel_release module_tree profile_pacman_conf relative surface_package dms_greeter_package checksum
 	kernel_release=$(tr -d '\n' <"$SURFACE_WORK_DIR/kernel/release")
 	module_tree="$SURFACE_WORK_DIR/modules/lib/modules/$kernel_release"
 	[[ -f "$SURFACE_WORK_DIR/kernel/Image" ]] || die "Surface kernel Image is missing"
@@ -606,6 +660,20 @@ stage_profile() {
 		[[ -s "$PROFILE_DIR/airootfs/usr/lib/firmware/$relative" ]] ||
 			die "staged GPU firmware is empty: $relative"
 	done
+	if (( DSP_FIRMWARE_ENABLED )); then
+		: >"$PROFILE_DIR/airootfs/usr/lib/surface-laptop-13/dsp-firmware.list"
+		for relative in "${DSP_FIRMWARE_FILES[@]}"; do
+			install -D -m 0644 "$FIRMWARE_DIR/$relative" \
+				"$PROFILE_DIR/airootfs/usr/lib/firmware/$relative"
+			[[ -s "$PROFILE_DIR/airootfs/usr/lib/firmware/$relative" ]] ||
+				die "staged DSP firmware is empty: $relative"
+			checksum=$(sha256sum "$FIRMWARE_DIR/$relative" | awk '{print $1}')
+			printf '%s  %s\n' "$checksum" "$relative" \
+				>>"$PROFILE_DIR/airootfs/usr/lib/surface-laptop-13/dsp-firmware.list"
+		done
+	else
+		rm -f -- "$PROFILE_DIR/airootfs/usr/lib/surface-laptop-13/dsp-firmware.list"
+	fi
 	python3 "$ROOT_DIR/archlinux/prepare-wifi-firmware.py" \
 		"$FIRMWARE_DIR/ath12k/WCN7850/hw2.0" \
 		--output "$PROFILE_DIR/airootfs/usr/lib/firmware/ath12k/WCN7850/hw2.0" \
@@ -614,6 +682,10 @@ stage_profile() {
 		"$PROFILE_DIR/grub/surface-laptop-13-archlinux.dtb"
 	cp "$SURFACE_WORK_DIR/dtb/surface-laptop-13-archlinux-bluetooth.dtb" \
 		"$PROFILE_DIR/grub/surface-laptop-13-archlinux-bluetooth.dtb"
+	if (( DSP_FIRMWARE_ENABLED )); then
+		sed -i 's|Surface Laptop 13 (safe, DSP disabled)|Surface Laptop 13 (battery communication, DSP enabled)|' \
+			"$PROFILE_DIR/grub/grub.cfg"
+	fi
 }
 
 trim_build_inputs() {
@@ -624,6 +696,7 @@ trim_build_inputs() {
 	rm -rf -- "$KERNEL_SOURCE_DIR" "$SURFACE_OUTPUT_DIR" "$SURFACE_WORK_DIR" \
 		"$SURFACE_PACKAGE_DIR" "$FIRMWARE_DIR"
 	rm -f -- "$BUILD_DIR"/linux-*.tar.gz "$BUILD_DIR/surface-no-dsp.dtbo" \
+		"$DSP_FIRMWARE_ARCHIVE" \
 		"$ROOTFS_ARCHIVE" "$ROOTFS_MD5_FILE" "$DMS_GREETER_ARCHIVE"
 }
 
@@ -680,6 +753,26 @@ main() {
 		esac
 		python3 "$ROOT_DIR/archlinux/prepare-gpu-firmware.py" "$GPU_FIRMWARE_SOURCE"
 	fi
+	if [[ -n "$DSP_FIRMWARE_SOURCE" && -n "$DSP_FIRMWARE_URL" ]]; then
+		die "set only one of DSP_FIRMWARE_SOURCE and DSP_FIRMWARE_URL"
+	fi
+	if [[ -n "$DSP_FIRMWARE_SOURCE" ]]; then
+		DSP_FIRMWARE_SOURCE=$(absolute_path "$DSP_FIRMWARE_SOURCE")
+		case "$DSP_FIRMWARE_SOURCE/" in
+			"$BUILD_DIR/"*) die "DSP firmware must be outside the disposable scratch directory" ;;
+		esac
+		[[ -d "$DSP_FIRMWARE_SOURCE" ]] ||
+			die "Surface DSP firmware tree not found: $DSP_FIRMWARE_SOURCE"
+		for relative in "${DSP_FIRMWARE_FILES[@]}"; do
+			[[ -s "$DSP_FIRMWARE_SOURCE/$relative" ]] ||
+				die "Surface DSP firmware is missing: $DSP_FIRMWARE_SOURCE/$relative"
+		done
+		DSP_FIRMWARE_ENABLED=1
+	elif [[ -n "$DSP_FIRMWARE_URL" ]]; then
+		[[ "$DSP_FIRMWARE_URL" == https://* ]] ||
+			die "DSP_FIRMWARE_URL must use HTTPS"
+		DSP_FIRMWARE_ENABLED=1
+	fi
 	[[ "$(uname -m)" == aarch64 ]] || die "Arch Linux ARM ISO builds must run on an AArch64 host"
 	[[ "$(id -u)" -eq 0 ]] || die "run this builder as root (for example: sudo ./archlinux/build-iso.sh)"
 	for host_command in awk bsdtar chroot curl dtc fdtoverlay fdtget findmnt git gzip make md5sum mount python3 sha256sum stat tar umount; do
@@ -696,7 +789,7 @@ main() {
 	download_archiso
 	download_kernel
 	build_surface_kernel_and_dtb
-	build_no_dsp_dtbs
+	build_archlinux_dtbs
 	build_surface_kernel_package
 	build_dms_greeter_package
 	stage_profile

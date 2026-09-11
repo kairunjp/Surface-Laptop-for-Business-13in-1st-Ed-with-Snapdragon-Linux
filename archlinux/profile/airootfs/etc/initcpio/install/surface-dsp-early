@@ -1,0 +1,18 @@
+#!/usr/bin/bash
+
+build() {
+  local list=/usr/lib/surface-laptop-13/dsp-firmware.list
+  local checksum firmware
+
+  [[ -f "$list" ]] || return 0
+  while read -r checksum firmware; do
+    [[ -n "$checksum" && -n "$firmware" ]] || continue
+    add_file_early "/lib/firmware/$firmware"
+  done < "$list"
+}
+
+help() {
+  cat <<HELPEOF
+Adds the optional Surface ADSP/CDSP firmware to the early initramfs.
+HELPEOF
+}

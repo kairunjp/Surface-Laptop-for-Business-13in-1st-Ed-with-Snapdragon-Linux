@@ -51,6 +51,30 @@ for firmware in \
     fi
 done
 
+# The battery-capable DTB boots the Surface ADSP/CDSP through remoteproc.
+# Validate the optional private firmware set before mkinitcpio creates the
+# live initramfs; the list is absent on the safe no-DSP image.
+if [[ -f "$surface_root/dsp-firmware.list" ]]; then
+    while read -r checksum relative; do
+        [[ -n "$checksum" && -n "$relative" ]] || continue
+        case "$relative" in
+            /*|../*|*/../*|*/..)
+                printf 'unsafe DSP firmware path: %s\n' "$relative" >&2
+                exit 1
+                ;;
+        esac
+        firmware="/lib/firmware/$relative"
+        if [[ ! -s "$firmware" ]]; then
+            printf 'missing Surface DSP firmware: %s\n' "$relative" >&2
+            exit 1
+        fi
+        if ! printf '%s  %s\n' "$checksum" "$firmware" | sha256sum -c - >/dev/null; then
+            printf 'unexpected Surface DSP firmware checksum: %s\n' "$relative" >&2
+            exit 1
+        fi
+    done < "$surface_root/dsp-firmware.list"
+fi
+
 # Detect package installation replacing any part of the reference set before
 # mkinitcpio copies it into the boot image.
 (

@@ -69,11 +69,29 @@ sudo ./archlinux/build-iso.sh
 ```
 
 The scratch directory must have several GiB free; set
-`ARCHLINUX_BUILD_DIR` and `ARCHLINUX_OUTPUT_DIR` to change its locations. The
-ISO uses the safe no-DSP DTB because the Surface DSP firmware is not
-redistributed by this repository, so audio is intentionally disabled in this
-live image. Secure Boot may need to be disabled because the development
+`ARCHLINUX_BUILD_DIR` and `ARCHLINUX_OUTPUT_DIR` to change its locations. By
+default, the ISO uses the safe no-DSP DTB because the Surface DSP firmware is
+not redistributed by this repository, so audio is intentionally disabled in
+this live image. Secure Boot may need to be disabled because the development
 kernel and GRUB payload are unsigned.
+
+To build the battery-capable image, provide the private Surface DSP firmware
+tree used by the main-branch EL1 DTB:
+
+```sh
+sudo env DSP_FIRMWARE_SOURCE="$PWD/build/firmware-tree" \
+  ./archlinux/build-iso.sh
+```
+
+The tree must contain the four files named by the DTB under
+`qcom/x1p42100/Microsoft/Surface12/`. The builder then uses the main-branch
+DSP-enabled DTB and copies those files into the live root, installed target,
+and early initramfs. The files are not stored in Git; omit the variable to
+retain the safe no-DSP image.
+
+The GitHub Actions workflow accepts the same archive through the manual
+`dsp_firmware_url` input, the `DSP_FIRMWARE_URL` Actions Secret (preferred),
+or the repository variable of the same name.
 
 
 ## Boot files

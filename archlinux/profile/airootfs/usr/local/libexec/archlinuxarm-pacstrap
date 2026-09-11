@@ -95,7 +95,7 @@ if (( dms_greeter_requested )); then
 fi
 
 stage_surface_firmware() {
-    local relative source destination
+    local relative source destination checksum
     [[ -n "$target_root" ]] || return 0
     for relative in \
         qcom/gen71500_sqe.fw \
@@ -118,6 +118,32 @@ stage_surface_firmware() {
         destination="$target_root/usr/lib/firmware/$relative"
         install -D -m 0644 "$source" "$destination"
     done
+
+    # The DSP firmware is an optional private build input.  Its manifest is
+    # present only when the live ISO was built with the main-branch,
+    # battery-capable DTB, so the normal no-DSP ISO does not require it.
+    if [[ -f /usr/lib/surface-laptop-13/dsp-firmware.list ]]; then
+        while read -r checksum relative; do
+            [[ -n "$checksum" && -n "$relative" ]] || continue
+            case "$relative" in
+                /*|../*|*/../*|*/..)
+                    printf 'archlinuxarm-pacstrap: unsafe DSP firmware path: %s\n' "$relative" >&2
+                    return 1
+                    ;;
+            esac
+            source="$surface_firmware_root/$relative"
+            [[ -s "$source" ]] || {
+                printf 'archlinuxarm-pacstrap: live DSP firmware is missing: %s\n' "$relative" >&2
+                return 1
+            }
+            printf '%s  %s\n' "$checksum" "$source" | sha256sum -c - >/dev/null || {
+                printf 'archlinuxarm-pacstrap: live DSP firmware checksum mismatch: %s\n' "$relative" >&2
+                return 1
+            }
+            destination="$target_root/usr/lib/firmware/$relative"
+            install -D -m 0644 "$source" "$destination"
+        done < /usr/lib/surface-laptop-13/dsp-firmware.list
+    fi
 }
 
 verify_installed_surface_gpu_firmware() {
@@ -224,7 +250,8 @@ fi
 if (( pacstrap_status == 0 )); then
 	# The local Surface kernel package runs mkinitcpio hooks while it is
 	# installed. Stage firmware first so its initial initramfs/UKI includes
-	# the device-specific GPU blob instead of only copying it to the rootfs.
+	# the device-specific GPU and, when enabled, DSP blobs instead of only
+	# copying them to the rootfs.
 	stage_surface_firmware || pacstrap_status=$?
 fi
 
