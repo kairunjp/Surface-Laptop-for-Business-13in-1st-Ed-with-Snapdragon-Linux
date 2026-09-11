@@ -100,8 +100,7 @@ stage_surface_firmware() {
     for relative in \
         qcom/gen71500_sqe.fw \
         qcom/gen71500_gmu.bin \
-        qcom/gen71500_zap.mbn \
-        qcom/x1p42100/Microsoft/Surface12/qcdxkmsucpurwa.mbn \
+        qcom/x1p42100/gen71500_zap.mbn \
         ath12k/WCN7850/hw2.0/amss.bin \
         ath12k/WCN7850/hw2.0/m3.bin \
         ath12k/WCN7850/hw2.0/board.bin \

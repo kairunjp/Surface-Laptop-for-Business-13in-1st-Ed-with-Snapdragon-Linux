@@ -5,8 +5,7 @@ build() {
   for firmware in \
     qcom/gen71500_sqe.fw \
     qcom/gen71500_gmu.bin \
-    qcom/gen71500_zap.mbn \
-    qcom/x1p42100/Microsoft/Surface12/qcdxkmsucpurwa.mbn; do
+    qcom/x1p42100/gen71500_zap.mbn; do
     add_file_early "/lib/firmware/$firmware"
   done
 }

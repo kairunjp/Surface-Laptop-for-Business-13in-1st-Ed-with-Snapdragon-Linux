@@ -10,9 +10,8 @@ image reproducible. Its hashes are recorded in
 `drivers/firmware-manifest.json`; the archive includes Qualcomm's `Notice.txt`.
 The Qualcomm Adreno reference set in
 `build/archlinux-reference/surface-pve-gpu-reference.tar.gz` is copied from
-the same machine's firmware installation. Its hashes are recorded in
-`drivers/firmware-manifest.json` and it includes the Surface-specific signed
-KMS firmware required by the Adreno driver. Check the vendor terms before
-redistribution.
+the same machine's firmware installation and contains the redistributable X1P
+firmware files used by the Adreno driver. Its hashes are recorded in
+`drivers/firmware-manifest.json`. Check the vendor terms before redistribution.
 Bluetooth firmware is fetched separately from the pinned linux-firmware
 revision. Check the vendor terms before redistribution.

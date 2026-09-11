@@ -44,8 +44,7 @@ done
 for firmware in \
     qcom/gen71500_sqe.fw \
     qcom/gen71500_gmu.bin \
-    qcom/gen71500_zap.mbn \
-    qcom/x1p42100/Microsoft/Surface12/qcdxkmsucpurwa.mbn; do
+    qcom/x1p42100/gen71500_zap.mbn; do
     if [[ ! -s "/lib/firmware/$firmware" ]]; then
         printf 'missing Surface GPU firmware: %s\n' "$firmware" >&2
         exit 1
@@ -84,8 +83,7 @@ done
 for firmware in \
     qcom/gen71500_sqe.fw \
     qcom/gen71500_gmu.bin \
-    qcom/gen71500_zap.mbn \
-    qcom/x1p42100/Microsoft/Surface12/qcdxkmsucpurwa.mbn; do
+    qcom/x1p42100/gen71500_zap.mbn; do
     if ! lsinitcpio --early /boot/initramfs-linux.img | grep -Fq \
         "usr/lib/firmware/$firmware"; then
         printf 'Required GPU firmware is not in the early initramfs: %s\n' "$firmware" >&2

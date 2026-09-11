@@ -8,11 +8,13 @@ from pathlib import Path
 import tarfile
 
 
-NAMES = (
-    "qcom/gen71500_sqe.fw",
-    "qcom/gen71500_gmu.bin",
-    "qcom/gen71500_zap.mbn",
-    "qcom/x1p42100/Microsoft/Surface12/qcdxkmsucpurwa.mbn",
+REFERENCES = (
+    ("qcom/gen71500_sqe.fw", "qcom/gen71500_sqe.fw"),
+    ("qcom/gen71500_gmu.bin", "qcom/gen71500_gmu.bin"),
+    # The redistributable X1P zap blob is stored at the generic qcom root in
+    # the reference archive, but the upstream X1P DT binding requests it from
+    # the qcom/x1p42100 directory.
+    ("qcom/gen71500_zap.mbn", "qcom/x1p42100/gen71500_zap.mbn"),
 )
 MANIFEST = Path(__file__).resolve().parents[1] / "drivers/firmware-manifest.json"
 
@@ -35,23 +37,23 @@ def load_reference(source: Path):
     result = {}
     archive = None if source.is_dir() else tarfile.open(source, "r:*")
     try:
-        for name in NAMES:
-            entry = expected[name]
+        for source_name, staged_name in REFERENCES:
+            entry = expected[source_name]
             if archive is None:
-                with _directory_member(source, name).open("rb") as stream:
+                with _directory_member(source, source_name).open("rb") as stream:
                     data = stream.read(entry["bytes"] + 1)
             else:
-                matches = [member for member in archive.getmembers() if member.name == name]
+                matches = [member for member in archive.getmembers() if member.name == source_name]
                 if len(matches) != 1 or not matches[0].isfile():
-                    raise ValueError(f"expected one regular archive member: {name}")
+                    raise ValueError(f"expected one regular archive member: {source_name}")
                 if matches[0].size != entry["bytes"]:
-                    raise ValueError(f"unexpected archive member size: {name}")
+                    raise ValueError(f"unexpected archive member size: {source_name}")
                 with archive.extractfile(matches[0]) as stream:
                     data = stream.read(entry["bytes"] + 1)
             digest = hashlib.sha256(data).hexdigest()
             if len(data) != entry["bytes"] or digest != entry["sha256"]:
-                raise ValueError(f"{name}: does not match the validated Surface firmware ({digest})")
-            result[name] = data
+                raise ValueError(f"{source_name}: does not match the validated X1P firmware ({digest})")
+            result[staged_name] = data
     finally:
         if archive is not None:
             archive.close()

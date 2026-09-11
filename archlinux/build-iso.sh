@@ -58,8 +58,7 @@ declare -A FIRMWARE_SHA256=(
 GPU_FIRMWARE_FILES=(
 	qcom/gen71500_sqe.fw
 	qcom/gen71500_gmu.bin
-	qcom/gen71500_zap.mbn
-	qcom/x1p42100/Microsoft/Surface12/qcdxkmsucpurwa.mbn
+	qcom/x1p42100/gen71500_zap.mbn
 )
 
 MOUNTS=()
@@ -441,8 +440,7 @@ EOF
 FILES+=(
   /lib/firmware/qcom/gen71500_sqe.fw
   /lib/firmware/qcom/gen71500_gmu.bin
-  /lib/firmware/qcom/gen71500_zap.mbn
-  /lib/firmware/qcom/x1p42100/Microsoft/Surface12/qcdxkmsucpurwa.mbn
+  /lib/firmware/qcom/x1p42100/gen71500_zap.mbn
   /lib/firmware/ath12k/WCN7850/hw2.0/amss.bin
   /lib/firmware/ath12k/WCN7850/hw2.0/m3.bin
   /lib/firmware/ath12k/WCN7850/hw2.0/board.bin

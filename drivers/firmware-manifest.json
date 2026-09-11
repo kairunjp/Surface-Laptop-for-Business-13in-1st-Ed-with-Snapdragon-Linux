@@ -12,10 +12,6 @@
       "bytes": 12088,
       "sha256": "8c65c78a87860a3e5927b597cf95a52db2a29f3d1c475da0d07fac194b3ab26e"
     },
-    "qcom/x1p42100/Microsoft/Surface12/qcdxkmsucpurwa.mbn": {
-      "bytes": 12088,
-      "sha256": "5ed82d0d9450b8dad524cca23a68d5052217e7e9e40a6a2672f56633c141ced3"
-    },
     "ath12k/WCN7850/hw2.0/Notice.txt": {
       "bytes": 142991,
       "sha256": "515bf4c9d620a87458e4447fe01a0e9bc384d1c3e0037cc4c3d2037b1ff25525"
