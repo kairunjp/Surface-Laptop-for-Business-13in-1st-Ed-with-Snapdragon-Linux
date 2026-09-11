@@ -144,8 +144,10 @@ the same Surface kernel image and modules used by the live environment, the
 no-DSP Surface DTB, and a mkinitcpio preset for a Surface UKI. The live
 archinstall package is patched at image-build time so `Kernels` includes
 `linux-surface-laptop-13` and selects it by default. The pacstrap wrapper
-replaces that package name with the bundled local package, then copies the
-validated GPU, Wi-Fi, and Bluetooth firmware into the new root.
+copies and checksum-verifies the validated GPU, Wi-Fi, and Bluetooth firmware
+into the new root *before* installing the bundled local kernel package. Its
+mkinitcpio hook therefore includes the Surface Laptop 13 GPU firmware in the
+first installed initramfs.
 
 When systemd-boot UKI mode is selected, archinstall generates
 `arch-linux-surface-laptop-13.efi` with `/boot/surface-laptop-13.dtb` embedded

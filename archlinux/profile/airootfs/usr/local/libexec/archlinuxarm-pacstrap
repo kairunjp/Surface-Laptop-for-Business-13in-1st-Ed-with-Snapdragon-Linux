@@ -120,6 +120,28 @@ stage_surface_firmware() {
     done
 }
 
+verify_installed_surface_gpu_firmware() {
+    local checksum relative firmware
+
+    [[ -n "$target_root" ]] || return 0
+    while read -r checksum relative; do
+        [[ -n "$checksum" ]] || continue
+        firmware="$target_root/usr/lib/firmware/$relative"
+        [[ -s "$firmware" ]] || {
+            printf 'archlinuxarm-pacstrap: installed Surface GPU firmware is missing: %s\n' "$relative" >&2
+            return 1
+        }
+        printf '%s  %s\n' "$checksum" "$firmware" | sha256sum -c - >/dev/null || {
+            printf 'archlinuxarm-pacstrap: installed Surface GPU firmware has an unexpected checksum: %s\n' "$relative" >&2
+            return 1
+        }
+    done <<'EOF'
+eee95622aa1e487e96de55469a65c5642ce9b8c724f9da768c79fe54df760eff qcom/gen71500_sqe.fw
+5e655569c21bf964e0af1cb8a06e710b360fadba238d7d9d0dd1167a8395022c qcom/gen71500_gmu.bin
+de957e0a25c2a42f417f8e95ccf1cbdfeed5a4a6d77a84e215389b8b78fc8bf4 qcom/x1p42100/Microsoft/SurfaceLaptop13/qcdxkmsucpurwa.mbn
+EOF
+}
+
 install_surface_kernel_package() {
     (( surface_kernel_requested )) || return 0
     /usr/bin/pacman \
@@ -200,6 +222,17 @@ else
 fi
 
 if (( pacstrap_status == 0 )); then
+	# The local Surface kernel package runs mkinitcpio hooks while it is
+	# installed. Stage firmware first so its initial initramfs/UKI includes
+	# the device-specific GPU blob instead of only copying it to the rootfs.
+	stage_surface_firmware || pacstrap_status=$?
+fi
+
+if (( pacstrap_status == 0 )); then
+	verify_installed_surface_gpu_firmware || pacstrap_status=$?
+fi
+
+if (( pacstrap_status == 0 )); then
 	install_surface_kernel_package || pacstrap_status=$?
 fi
 
@@ -209,10 +242,6 @@ fi
 
 if (( pacstrap_status == 0 )); then
 	install_zram_configuration || pacstrap_status=$?
-fi
-
-if (( pacstrap_status == 0 )); then
-	stage_surface_firmware || pacstrap_status=$?
 fi
 
 if (( pacstrap_status == 0 )); then
