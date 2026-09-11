@@ -118,6 +118,89 @@ PY
 
 patch_archinstall_kernel_menu
 
+patch_archinstall_dms_greeter() {
+	local profiles_handler
+	profiles_handler=$(find /usr/lib -type f \
+		-path '*/site-packages/archinstall/lib/profile/profiles_handler.py' \
+		-print -quit)
+	[[ -n "$profiles_handler" && -f "$profiles_handler" ]] || {
+		printf 'archinstall profile handler is missing\n' >&2
+		return 1
+	}
+
+	# Recent archinstall releases still write the pre-1.6 DMS path from the
+	# old Quickshell bundle. The standalone greeter package installed by the
+	# pacstrap wrapper exposes /usr/bin/dms-greeter instead.
+	python3 - "$profiles_handler" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text()
+new_command = '/usr/bin/dms-greeter --command niri'
+
+text, replacements = re.subn(
+    r'command = "[^"\n]*dms-greeter[^"\n]*"',
+    f'command = "{new_command}"',
+    text,
+    count=1,
+)
+if replacements != 1:
+    raise SystemExit('the archinstall DMS greeter command was not found')
+
+compile(text, str(path), 'exec')
+path.write_text(text)
+PY
+	python3 -m py_compile "$profiles_handler"
+	grep -Eq 'command[[:space:]]*=[[:space:]]*"/usr/bin/dms-greeter --command niri"' "$profiles_handler"
+}
+
+patch_archinstall_zram_setup() {
+	local installer
+	installer=$(find /usr/lib -type f \
+		-path '*/site-packages/archinstall/lib/installer.py' \
+		-print -quit)
+	[[ -n "$installer" && -f "$installer" ]] || {
+		printf 'archinstall installer module is missing\n' >&2
+		return 1
+	}
+
+	# Keep archinstall's normal zram setup, but make the generated device
+	# explicit and give it a useful priority on this 16 GiB machine. The
+	# pacstrap wrapper also seeds the same file before archinstall writes it.
+	python3 - "$installer" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text()
+old = (
+    "\t\t\tzram_conf.write('[zram0]\\n')\n"
+    "\t\t\tzram_conf.write(f'compression-algorithm = {algo.value}\\n')"
+)
+new = (
+    "\t\t\tzram_conf.write('[zram0]\\n')\n"
+    "\t\t\tzram_conf.write('zram-size = min(ram / 2, 8192)\\n')\n"
+    "\t\t\tzram_conf.write(f'compression-algorithm = {algo.value}\\n')\n"
+    "\t\t\tzram_conf.write('swap-priority = 100\\n')"
+)
+
+if old in text:
+    text = text.replace(old, new, 1)
+elif 'zram-size = min(ram / 2, 8192)' not in text:
+    raise SystemExit('archinstall zram configuration block was not found')
+
+compile(text, str(path), 'exec')
+path.write_text(text)
+PY
+	python3 -m py_compile "$installer"
+	grep -Fq "zram-size = min(ram / 2, 8192)" "$installer"
+}
+
+patch_archinstall_dms_greeter
+patch_archinstall_zram_setup
+
 patch_archinstall_wifi_handler() {
     local wifi_handler
     wifi_handler=$(find /usr/lib -type f \

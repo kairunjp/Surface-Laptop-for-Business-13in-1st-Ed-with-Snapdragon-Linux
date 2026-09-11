@@ -50,12 +50,20 @@ fi
 
 pacstrap_args=()
 surface_kernel_requested=0
+dms_greeter_requested=0
+zram_requested=0
 for argument in "$@"; do
-    if [[ "$argument" == linux-surface-laptop-13 ]]; then
-        surface_kernel_requested=1
-    else
-        pacstrap_args+=("$argument")
-    fi
+	if [[ "$argument" == linux-surface-laptop-13 ]]; then
+		surface_kernel_requested=1
+	elif [[ "$argument" == greetd ]]; then
+		dms_greeter_requested=1
+		pacstrap_args+=("$argument")
+	elif [[ "$argument" == zram-generator ]]; then
+		zram_requested=1
+		pacstrap_args+=("$argument")
+	else
+		pacstrap_args+=("$argument")
+	fi
 done
 
 surface_kernel_package=
@@ -69,8 +77,21 @@ if (( surface_kernel_requested )); then
     # The local package is installed with pacman -U below. Install its repo
     # dependencies through pacstrap first, since pacman -U checks but does not
     # resolve dependencies from the sync databases. systemd-ukify is required
-    # by mkinitcpio to embed the Surface DTB in the installed UKI.
-    pacstrap_args+=(systemd-ukify wireless-regdb)
+	# by mkinitcpio to embed the Surface DTB in the installed UKI.
+	pacstrap_args+=(systemd-ukify wireless-regdb)
+fi
+
+dms_greeter_package=
+if (( dms_greeter_requested )); then
+	dms_greeter_package=$(find /usr/lib/surface-laptop-13 -maxdepth 1 -type f \
+		-name 'greetd-dms-greeter-bin-*.pkg.tar.*' ! -name '*.sig' -print -quit)
+	[[ -n "$dms_greeter_package" && -f "$dms_greeter_package" ]] || {
+		printf 'archlinuxarm-pacstrap: bundled DMS greeter package is missing\n' >&2
+		exit 1
+	}
+	# pacman -U checks dependencies but does not resolve them from sync
+	# databases. Install the runtime dependencies in the same pacstrap call.
+	pacstrap_args+=(quickshell qt6-declarative)
 fi
 
 stage_surface_firmware() {
@@ -104,7 +125,29 @@ install_surface_kernel_package() {
         --cachedir "$target_root/var/cache/pacman/pkg" \
         --config /etc/pacman.conf \
         --noconfirm \
-        -U "$surface_kernel_package"
+		-U "$surface_kernel_package"
+}
+
+install_dms_greeter_package() {
+	(( dms_greeter_requested )) || return 0
+	/usr/bin/pacman \
+		--root "$target_root" \
+		--dbpath "$target_root/var/lib/pacman" \
+		--cachedir "$target_root/var/cache/pacman/pkg" \
+		--config /etc/pacman.conf \
+		--noconfirm \
+		-U "$dms_greeter_package"
+}
+
+install_zram_configuration() {
+	(( zram_requested )) || return 0
+	[[ -n "$target_root" ]] || return 0
+	[[ -f /etc/systemd/zram-generator.conf ]] || {
+		printf 'archlinuxarm-pacstrap: live zram-generator.conf is missing\n' >&2
+		return 1
+	}
+	install -D -m 0644 /etc/systemd/zram-generator.conf \
+		"$target_root/etc/systemd/zram-generator.conf"
 }
 
 ensure_archinstall_kernel_preset() {
@@ -154,14 +197,19 @@ else
 fi
 
 if (( pacstrap_status == 0 )); then
-    # Install the package before staging the reference firmware.  The local
-    # package owns board.bin; copying it into the target first makes pacman
-    # reject the package with a file-conflict error.
-    install_surface_kernel_package || pacstrap_status=$?
+	install_surface_kernel_package || pacstrap_status=$?
 fi
 
 if (( pacstrap_status == 0 )); then
-    stage_surface_firmware || pacstrap_status=$?
+	install_dms_greeter_package || pacstrap_status=$?
+fi
+
+if (( pacstrap_status == 0 )); then
+	install_zram_configuration || pacstrap_status=$?
+fi
+
+if (( pacstrap_status == 0 )); then
+	stage_surface_firmware || pacstrap_status=$?
 fi
 
 if (( pacstrap_status == 0 )); then

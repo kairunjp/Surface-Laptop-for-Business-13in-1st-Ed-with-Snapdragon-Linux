@@ -33,6 +33,12 @@ SURFACE_OUTPUT_DIR="$SHARED_DIR/surface"
 SURFACE_WORK_DIR="$SHARED_DIR/surface-work"
 SURFACE_PACKAGE_DIR="$SHARED_DIR/surface-kernel-package"
 SURFACE_PACKAGE_NAME=linux-surface-laptop-13
+DMS_GREETER_VERSION=1.6.2
+DMS_GREETER_PACKAGE_NAME=greetd-dms-greeter-bin
+DMS_GREETER_PACKAGE_DIR="$SHARED_DIR/dms-greeter-package"
+DMS_GREETER_ARCHIVE="$BUILD_DIR/dms-greeter-linux-arm64-${DMS_GREETER_VERSION}.gz"
+DMS_GREETER_URL="https://github.com/AvengeMedia/dank-greeter/releases/download/v${DMS_GREETER_VERSION}/dms-greeter-linux-arm64.gz"
+DMS_GREETER_SHA256=29b6c010360d4df09e4dadf0224c0c6d43a52a9aa1bed74bb2184d6172f407e9
 ROOTFS_ARCHIVE="$BUILD_DIR/ArchLinuxARM-aarch64-latest.tar.gz"
 ROOTFS_MD5_FILE="$BUILD_DIR/ArchLinuxARM-aarch64-latest.tar.gz.md5"
 FIRMWARE_DIR="$SHARED_DIR/firmware"
@@ -198,6 +204,14 @@ install_archiso_build_dependencies() {
 	# The bootstrap rootfs is only the build host.  Its package cache is not
 	# copied into the ISO and can consume a meaningful part of the runner disk.
 	run_chroot pacman -Scc --noconfirm
+}
+
+download_dms_greeter() {
+	local expected
+	log "Downloading the pinned AArch64 DMS greeter"
+	curl -fL --retry 5 --retry-delay 2 "$DMS_GREETER_URL" -o "$DMS_GREETER_ARCHIVE"
+	expected="$DMS_GREETER_SHA256  $DMS_GREETER_ARCHIVE"
+	printf '%s\n' "$expected" | sha256sum -c -
 }
 
 download_archiso() {
@@ -444,8 +458,63 @@ EOF
 	printf 'target kernel package: %s\n' "${package_file##*/}"
 }
 
+build_dms_greeter_package() {
+	local package_root package_file
+
+	log "Building the standalone DMS greeter package"
+	rm -rf -- "$DMS_GREETER_PACKAGE_DIR"
+	package_root="$DMS_GREETER_PACKAGE_DIR/root"
+	install -d \
+		"$package_root/usr/bin" \
+		"$package_root/usr/lib/tmpfiles.d" \
+		"$package_root/usr/share/doc/$DMS_GREETER_PACKAGE_NAME"
+
+	# DankMaterialShell's current greeter is a single statically linked binary.
+	# Keep the package local to the ISO so target installation does not depend
+	# on the AUR or on a second download from the installer.
+	gzip -dc "$DMS_GREETER_ARCHIVE" >"$package_root/usr/bin/dms-greeter"
+	chmod 0755 "$package_root/usr/bin/dms-greeter"
+	cat >"$package_root/usr/lib/tmpfiles.d/dms-greeter.conf" <<'EOF'
+#  Path                   Mode User    Group   Age Argument
+d /var/cache/dms-greeter  0750 greeter greeter -
+d /var/lib/greeter       0755 greeter greeter -
+EOF
+	cat >"$DMS_GREETER_PACKAGE_DIR/PKGBUILD" <<EOF
+pkgname=$DMS_GREETER_PACKAGE_NAME
+pkgver=$DMS_GREETER_VERSION
+pkgrel=1
+pkgdesc='Greetd login screen with the Dank Material aesthetic (AArch64 binary)'
+arch=('aarch64')
+license=('MIT')
+depends=('greetd' 'quickshell' 'qt6-declarative')
+optdepends=('niri: Niri compositor support')
+provides=('greetd-dms-greeter' 'dms-greeter=$DMS_GREETER_VERSION')
+conflicts=('greetd-dms-greeter' 'greetd-dms-greeter-git' 'dms-greeter')
+
+package() {
+  cp -a /workspace/dms-greeter-package/root/. "\$pkgdir/"
+}
+EOF
+
+	mount_chroot_filesystems
+	if ! run_chroot id surface-builder >/dev/null 2>&1; then
+		run_chroot useradd --system --user-group --create-home --home-dir /home/surface-builder \
+			--shell /usr/bin/nologin surface-builder
+	fi
+	run_chroot chown -R surface-builder:surface-builder /workspace/dms-greeter-package
+	run_chroot runuser -u surface-builder -- sh -c \
+		'cd /workspace/dms-greeter-package && HOME=/home/surface-builder makepkg --nodeps --nocheck --noconfirm --cleanbuild --force'
+	cleanup_mounts
+
+	package_file=$(find "$DMS_GREETER_PACKAGE_DIR" -maxdepth 1 -type f \
+		-name "$DMS_GREETER_PACKAGE_NAME-*.pkg.tar.*" ! -name '*.sig' -print -quit)
+	[[ -n "$package_file" && -f "$package_file" ]] ||
+		die "DMS greeter package was not created"
+	printf 'target DMS greeter package: %s\n' "${package_file##*/}"
+}
+
 stage_profile() {
-	local kernel_release module_tree profile_pacman_conf relative surface_package
+	local kernel_release module_tree profile_pacman_conf relative surface_package dms_greeter_package
 	kernel_release=$(tr -d '\n' <"$SURFACE_WORK_DIR/kernel/release")
 	module_tree="$SURFACE_WORK_DIR/modules/lib/modules/$kernel_release"
 	[[ -f "$SURFACE_WORK_DIR/kernel/Image" ]] || die "Surface kernel Image is missing"
@@ -454,6 +523,10 @@ stage_profile() {
 		-name "$SURFACE_PACKAGE_NAME-*.pkg.tar.*" ! -name '*.sig' -print -quit)
 	[[ -n "$surface_package" && -f "$surface_package" ]] ||
 		die "Surface target kernel package is missing"
+	dms_greeter_package=$(find "$DMS_GREETER_PACKAGE_DIR" -maxdepth 1 -type f \
+		-name "$DMS_GREETER_PACKAGE_NAME-*.pkg.tar.*" ! -name '*.sig' -print -quit)
+	[[ -n "$dms_greeter_package" && -f "$dms_greeter_package" ]] ||
+		die "DMS greeter package is missing"
 
 	log "Assembling the AArch64 archiso profile"
 	install -d "$PROFILE_DIR" "$ARCHISO_OUT_DIR"
@@ -482,6 +555,8 @@ stage_profile() {
 		"$PROFILE_DIR/airootfs/usr/lib/surface-laptop-13/Image"
 	install -m 0644 "$surface_package" \
 		"$PROFILE_DIR/airootfs/usr/lib/surface-laptop-13/$(basename "$surface_package")"
+	install -m 0644 "$dms_greeter_package" \
+		"$PROFILE_DIR/airootfs/usr/lib/surface-laptop-13/$(basename "$dms_greeter_package")"
 	cp -a "$module_tree" "$PROFILE_DIR/airootfs/usr/lib/modules/"
 	for link in build source; do
 		if [[ -L "$PROFILE_DIR/airootfs/usr/lib/modules/$kernel_release/$link" ]]; then
@@ -512,7 +587,7 @@ trim_build_inputs() {
 	rm -rf -- "$KERNEL_SOURCE_DIR" "$SURFACE_OUTPUT_DIR" "$SURFACE_WORK_DIR" \
 		"$SURFACE_PACKAGE_DIR" "$FIRMWARE_DIR"
 	rm -f -- "$BUILD_DIR"/linux-*.tar.gz "$BUILD_DIR/surface-no-dsp.dtbo" \
-		"$ROOTFS_ARCHIVE" "$ROOTFS_MD5_FILE"
+		"$ROOTFS_ARCHIVE" "$ROOTFS_MD5_FILE" "$DMS_GREETER_ARCHIVE"
 }
 
 build_iso() {
@@ -558,11 +633,12 @@ main() {
 	fi
 	[[ "$(uname -m)" == aarch64 ]] || die "Arch Linux ARM ISO builds must run on an AArch64 host"
 	[[ "$(id -u)" -eq 0 ]] || die "run this builder as root (for example: sudo ./archlinux/build-iso.sh)"
-	for host_command in awk bsdtar chroot curl dtc fdtoverlay fdtget findmnt git make md5sum mount python3 sha256sum stat tar umount; do
+	for host_command in awk bsdtar chroot curl dtc fdtoverlay fdtget findmnt git gzip make md5sum mount python3 sha256sum stat tar umount; do
 		need "$host_command"
 	done
 	reset_scratch
 	download_firmware
+	download_dms_greeter
 	download_rootfs
 	prepare_rootfs_network
 	mount_chroot_filesystems
@@ -573,6 +649,7 @@ main() {
 	build_surface_kernel_and_dtb
 	build_no_dsp_dtbs
 	build_surface_kernel_package
+	build_dms_greeter_package
 	stage_profile
 	trim_build_inputs
 	build_iso
