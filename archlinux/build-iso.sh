@@ -19,7 +19,7 @@ GPU_FIRMWARE_SOURCE=${GPU_FIRMWARE_SOURCE:-}
 GPU_FIRMWARE_URL=${GPU_FIRMWARE_URL:-}
 SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-$(date +%s)}
 DEFAULT_WCN7850_FIRMWARE_SOURCE="$ROOT_DIR/build/archlinux-reference/surface-pve-wifi-reference.tar.gz"
-DEFAULT_GPU_FIRMWARE_SOURCE="$ROOT_DIR/build/archlinux-reference/surface-pve-gpu-reference.tar.gz"
+DEFAULT_GPU_FIRMWARE_SOURCE="$ROOT_DIR/build/archlinux-reference/surface-laptop13-gpu-reference.tar.gz"
 
 # Arch Linux ARM currently signs packages with this key. The keyring package
 # carries its historical certifications as marginal trust, so explicitly
@@ -58,7 +58,7 @@ declare -A FIRMWARE_SHA256=(
 GPU_FIRMWARE_FILES=(
 	qcom/gen71500_sqe.fw
 	qcom/gen71500_gmu.bin
-	qcom/x1p42100/gen71500_zap.mbn
+	qcom/x1p42100/Microsoft/SurfaceLaptop13/qcdxkmsucpurwa.mbn
 )
 
 MOUNTS=()
@@ -322,7 +322,7 @@ download_firmware() {
 	[[ -n "$wifi_source" ]] || die "Wi-Fi reference source is not configured"
 	python3 "$ROOT_DIR/archlinux/prepare-wifi-firmware.py" "$wifi_source" \
 		--output "$FIRMWARE_DIR/ath12k/WCN7850/hw2.0"
-	log "Validating the surface-pve Adreno GPU firmware reference"
+	log "Validating the Surface Laptop 13 Adreno GPU firmware reference"
 	gpu_source="$GPU_FIRMWARE_SOURCE"
 	if [[ -n "$GPU_FIRMWARE_URL" ]]; then
 		gpu_source="$SHARED_DIR/surface-gpu-reference.tar.gz"
@@ -440,7 +440,7 @@ EOF
 FILES+=(
   /lib/firmware/qcom/gen71500_sqe.fw
   /lib/firmware/qcom/gen71500_gmu.bin
-  /lib/firmware/qcom/x1p42100/gen71500_zap.mbn
+  /lib/firmware/qcom/x1p42100/Microsoft/SurfaceLaptop13/qcdxkmsucpurwa.mbn
   /lib/firmware/ath12k/WCN7850/hw2.0/amss.bin
   /lib/firmware/ath12k/WCN7850/hw2.0/m3.bin
   /lib/firmware/ath12k/WCN7850/hw2.0/board.bin

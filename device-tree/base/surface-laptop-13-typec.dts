@@ -2767,7 +2767,7 @@
 
 			gpu_zap_shader: zap-shader {
 				memory-region = <0x9d>;
-				firmware-name = "qcom/x1p42100/gen71500_zap.mbn";
+				firmware-name = "qcom/x1p42100/Microsoft/SurfaceLaptop13/qcdxkmsucpurwa.mbn";
 			};
 
 			opp-table {

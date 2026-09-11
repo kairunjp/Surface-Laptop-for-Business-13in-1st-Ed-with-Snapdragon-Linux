@@ -58,7 +58,7 @@ to the branch to trigger it automatically.
 The working boot Wi-Fi reference archive is checked in at
 `build/archlinux-reference/surface-pve-wifi-reference.tar.gz` and is used by
 CI automatically. The Surface Adreno firmware reference archive is checked in
-at `build/archlinux-reference/surface-pve-gpu-reference.tar.gz` as well. A
+at `build/archlinux-reference/surface-laptop13-gpu-reference.tar.gz` as well. A
 manual run may override either archive with the `wifi_firmware_url` or
 `gpu_firmware_url` input; see [the reference requirements](docs/archlinux.md).
 

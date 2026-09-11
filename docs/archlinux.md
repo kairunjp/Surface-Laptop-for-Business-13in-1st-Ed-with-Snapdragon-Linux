@@ -19,16 +19,18 @@ updates it with `pacman`. It fetches archiso `v90`, builds the kernel revision
 locked in `kernel/source.lock`, and obtains Bluetooth firmware from the pinned
 linux-firmware revision. Wi-Fi uses the exact files from the working
 `surface-pve` boot initramfs, validated against `drivers/firmware-manifest.json`.
-The Adreno GPU uses the redistributable X1P firmware set from linux-firmware:
-`gen71500_sqe.fw`, `gen71500_gmu.bin`, and the generic
-`gen71500_zap.mbn`. The zap blob is staged at
-`qcom/x1p42100/gen71500_zap.mbn`, which is the path requested by the upstream
-X1P device tree. Both sets are copied into the live root, the early initramfs,
-and the kernel's built-in firmware directory so PCI/DRM probes cannot race the
-root filesystem. The kernel also adds the Surface compatible to the Qualcomm
-QSEECOM allowlist. The builder also imports the official Arch Linux ARM
-keyring, locally signs its package-build key to account for the key's legacy
-certification, and keeps package signature verification enabled.
+The Adreno GPU uses `gen71500_sqe.fw` and `gen71500_gmu.bin` from
+linux-firmware plus the device-specific `qcdxkmsucpurwa.mbn` extracted from
+Microsoft's official Surface Laptop 13 driver MSI. The signed blob is staged
+at `qcom/x1p42100/Microsoft/SurfaceLaptop13/qcdxkmsucpurwa.mbn`; the generic
+X1P zap blob and the similarly named Surface Pro 12 blob are rejected by this
+machine's TrustZone with `-22`. Both firmware sets are copied into the live
+root, the early initramfs, and the kernel's built-in firmware directory so
+PCI/DRM probes cannot race the root filesystem. The kernel also adds the
+Surface compatible to the Qualcomm QSEECOM allowlist. The builder imports the
+official Arch Linux ARM keyring, locally signs its package-build key to account
+for the key's legacy certification, and keeps package signature verification
+enabled.
 
 CI uses the checked-in archive
 `build/archlinux-reference/surface-pve-wifi-reference.tar.gz` by default. A
@@ -40,13 +42,11 @@ Missing or mismatched reference inputs fail the build; it does not substitute
 another board's calibration.
 
 CI also uses the checked-in
-`build/archlinux-reference/surface-pve-gpu-reference.tar.gz` by default. A
-manual run may override it with `gpu_firmware_url` (or the `GPU_FIRMWARE_URL`
-repository variable). It must contain `gen71500_sqe.fw`, `gen71500_gmu.bin`,
-and `gen71500_zap.mbn` under `qcom/`. The builder checks every file's size and
-SHA-256 before staging it. The old `qcdxkmsucpurwa.mbn` blob from the PVE
-filesystem is deliberately not used: on this hardware it reaches PAS and is
-rejected with `-22` during GPU firmware initialization.
+`build/archlinux-reference/surface-laptop13-gpu-reference.tar.gz` by default. A
+manual run may override it explicitly with `gpu_firmware_url`. It must contain
+`gen71500_sqe.fw`, `gen71500_gmu.bin`,
+and `x1p42100/Microsoft/SurfaceLaptop13/qcdxkmsucpurwa.mbn` under `qcom/`.
+The builder checks every file's size and SHA-256 before staging it.
 
 The WCN7850 and regulatory blobs are also embedded into the Arch kernel with
 `CONFIG_EXTRA_FIRMWARE`. The device's built-in ath12k/MHI probe can run before
@@ -65,7 +65,7 @@ sudo apt-get install build-essential bc bison cpio device-tree-compiler \
 sudo ARCHLINUX_BUILD_DIR=/var/tmp/surface-archlinux \
   ARCHLINUX_OUTPUT_DIR="$PWD/build/archlinux" \
   WCN7850_FIRMWARE_SOURCE=/path/to/surface-pve-wifi-reference.tar.gz \
-  GPU_FIRMWARE_SOURCE=/path/to/surface-pve-gpu-reference.tar.gz \
+  GPU_FIRMWARE_SOURCE=/path/to/surface-laptop13-gpu-reference.tar.gz \
   ./archlinux/build-iso.sh
 ```
 

@@ -11,10 +11,10 @@ import tarfile
 REFERENCES = (
     ("qcom/gen71500_sqe.fw", "qcom/gen71500_sqe.fw"),
     ("qcom/gen71500_gmu.bin", "qcom/gen71500_gmu.bin"),
-    # The redistributable X1P zap blob is stored at the generic qcom root in
-    # the reference archive, but the upstream X1P DT binding requests it from
-    # the qcom/x1p42100 directory.
-    ("qcom/gen71500_zap.mbn", "qcom/x1p42100/gen71500_zap.mbn"),
+    (
+        "qcom/x1p42100/Microsoft/SurfaceLaptop13/qcdxkmsucpurwa.mbn",
+        "qcom/x1p42100/Microsoft/SurfaceLaptop13/qcdxkmsucpurwa.mbn",
+    ),
 )
 MANIFEST = Path(__file__).resolve().parents[1] / "drivers/firmware-manifest.json"
 

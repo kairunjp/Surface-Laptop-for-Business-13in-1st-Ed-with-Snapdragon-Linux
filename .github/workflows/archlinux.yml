@@ -19,7 +19,7 @@ on:
         required: false
         type: string
       gpu_firmware_url:
-        description: 'HTTPS URL of the surface-pve Adreno GPU firmware tar.gz (or use repository variable GPU_FIRMWARE_URL)'
+        description: 'Optional HTTPS URL of a validated Surface Laptop 13 Adreno GPU firmware tar.gz'
         required: false
         type: string
 
@@ -39,7 +39,9 @@ jobs:
     timeout-minutes: 120
     env:
       WCN7850_FIRMWARE_URL: ${{ inputs.wifi_firmware_url || vars.WCN7850_FIRMWARE_URL }}
-      GPU_FIRMWARE_URL: ${{ inputs.gpu_firmware_url || vars.GPU_FIRMWARE_URL }}
+      # Use the checked-in, model-specific archive for push builds. Only an
+      # explicit manual input may replace it, avoiding stale repository URLs.
+      GPU_FIRMWARE_URL: ${{ inputs.gpu_firmware_url }}
 
     steps:
       - name: Check out source
