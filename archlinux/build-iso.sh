@@ -358,12 +358,11 @@ build_surface_kernel_package() {
 		"$package_root/boot/vmlinuz-linux-surface-laptop-13"
 	install -m 0644 "$SURFACE_WORK_DIR/dtb/surface-laptop-13-archlinux.dtb" \
 		"$package_root/boot/surface-laptop-13.dtb"
-	# linux-firmware already supplies amss.bin, m3.bin, and board-2.bin on
-	# Arch Linux ARM. board.bin is the Surface-specific file absent there, so
-	# keep only it in this package and refresh the complete reference set in
-	# the pacstrap wrapper after the repository transaction.
-	install -m 0644 "$FIRMWARE_DIR/ath12k/WCN7850/hw2.0/board.bin" \
-		"$package_root/usr/lib/firmware/ath12k/WCN7850/hw2.0/board.bin"
+	# Keep firmware out of the package itself. linux-firmware may already own
+	# board.bin on newer Arch Linux ARM snapshots, which would make pacman -U
+	# reject this package with a file conflict. The pacstrap wrapper installs
+	# the verified Surface reference set after all repository packages finish,
+	# so the hardware-specific board data wins without creating two owners.
 	cp -a "$module_tree" "$package_root/usr/lib/modules/"
 	local link
 	for link in build source; do
