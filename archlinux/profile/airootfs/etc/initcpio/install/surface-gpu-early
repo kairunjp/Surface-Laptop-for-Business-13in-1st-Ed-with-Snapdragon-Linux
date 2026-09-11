@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+
+build() {
+  local firmware
+  for firmware in \
+    qcom/gen71500_sqe.fw \
+    qcom/gen71500_gmu.bin \
+    qcom/gen71500_zap.mbn \
+    qcom/x1p42100/Microsoft/Surface12/qcdxkmsucpurwa.mbn; do
+    add_file_early "/lib/firmware/$firmware"
+  done
+}
+
+help() {
+  cat <<HELPEOF
+Adds the Surface Adreno X1P42100 firmware to mkinitcpio's early CPIO.
+HELPEOF
+}

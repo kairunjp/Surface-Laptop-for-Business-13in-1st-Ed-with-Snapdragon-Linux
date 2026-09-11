@@ -1,5 +1,21 @@
 {
   "files": {
+    "qcom/gen71500_gmu.bin": {
+      "bytes": 80268,
+      "sha256": "5e655569c21bf964e0af1cb8a06e710b360fadba238d7d9d0dd1167a8395022c"
+    },
+    "qcom/gen71500_sqe.fw": {
+      "bytes": 67348,
+      "sha256": "eee95622aa1e487e96de55469a65c5642ce9b8c724f9da768c79fe54df760eff"
+    },
+    "qcom/gen71500_zap.mbn": {
+      "bytes": 12088,
+      "sha256": "8c65c78a87860a3e5927b597cf95a52db2a29f3d1c475da0d07fac194b3ab26e"
+    },
+    "qcom/x1p42100/Microsoft/Surface12/qcdxkmsucpurwa.mbn": {
+      "bytes": 12088,
+      "sha256": "5ed82d0d9450b8dad524cca23a68d5052217e7e9e40a6a2672f56633c141ced3"
+    },
     "ath12k/WCN7850/hw2.0/Notice.txt": {
       "bytes": 142991,
       "sha256": "515bf4c9d620a87458e4447fe01a0e9bc384d1c3e0037cc4c3d2037b1ff25525"
@@ -65,6 +81,6 @@
       "sha256": "facca00c7cbc988d843776f8b8f8f7926f24007a1cfc540d2219a005f596114f"
     }
   },
-  "note": "The WCN7850 Wi-Fi files in build/archlinux-reference/surface-pve-wifi-reference.tar.gz are the validated surface-pve boot set. Verify these hashes before changing them. Bluetooth files remain downloaded from the pinned linux-firmware revision by the builders.",
+  "note": "The WCN7850 Wi-Fi files in build/archlinux-reference/surface-pve-wifi-reference.tar.gz and the qcom GPU files in build/archlinux-reference/surface-pve-gpu-reference.tar.gz are validated reference inputs copied from surface-pve. Verify these hashes before changing them. Bluetooth files remain downloaded from the pinned linux-firmware revision by the builders.",
   "schema": 1
 }

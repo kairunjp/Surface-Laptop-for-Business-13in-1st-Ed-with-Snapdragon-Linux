@@ -15,8 +15,11 @@ LINUX_FIRMWARE_REVISION=${LINUX_FIRMWARE_REVISION:-e981caea6ed33c48d25b7dbf47332
 LINUX_FIRMWARE_BASE_URL=${LINUX_FIRMWARE_BASE_URL:-https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git/plain}
 WCN7850_FIRMWARE_SOURCE=${WCN7850_FIRMWARE_SOURCE:-}
 WCN7850_FIRMWARE_URL=${WCN7850_FIRMWARE_URL:-}
+GPU_FIRMWARE_SOURCE=${GPU_FIRMWARE_SOURCE:-}
+GPU_FIRMWARE_URL=${GPU_FIRMWARE_URL:-}
 SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-$(date +%s)}
 DEFAULT_WCN7850_FIRMWARE_SOURCE="$ROOT_DIR/build/archlinux-reference/surface-pve-wifi-reference.tar.gz"
+DEFAULT_GPU_FIRMWARE_SOURCE="$ROOT_DIR/build/archlinux-reference/surface-pve-gpu-reference.tar.gz"
 
 # Arch Linux ARM currently signs packages with this key. The keyring package
 # carries its historical certifications as marginal trust, so explicitly
@@ -50,6 +53,13 @@ declare -A FIRMWARE_SHA256=(
 	["qca/hmtnv20.b10f"]=f8d027c5f0ea54456d23b903c55e1a87b06df97ff26b83e3fd02ac6b265b5264
 	["qca/hmtnv20.b112"]=f8d027c5f0ea54456d23b903c55e1a87b06df97ff26b83e3fd02ac6b265b5264
 	["qca/hmtnv20.bin"]=c26b340bbc8b617304610c774627ac4879194705eea7a7c7b13e3593903befd9
+)
+
+GPU_FIRMWARE_FILES=(
+	qcom/gen71500_sqe.fw
+	qcom/gen71500_gmu.bin
+	qcom/gen71500_zap.mbn
+	qcom/x1p42100/Microsoft/Surface12/qcdxkmsucpurwa.mbn
 )
 
 MOUNTS=()
@@ -256,9 +266,14 @@ download_kernel() {
 
 build_surface_kernel_and_dtb() {
 	local relative source
-	log "Staging firmware for the built-in early Wi-Fi loader"
+	log "Staging firmware for the built-in early Wi-Fi and GPU loaders"
 	rm -rf -- "$KERNEL_BUILTIN_FIRMWARE_DIR"
 	install -d "$KERNEL_BUILTIN_FIRMWARE_DIR"
+	for relative in "${GPU_FIRMWARE_FILES[@]}"; do
+		source="$FIRMWARE_DIR/$relative"
+		[[ -s "$source" ]] || die "Surface GPU firmware is missing before kernel build: $relative"
+		install -D -m 0644 "$source" "$KERNEL_BUILTIN_FIRMWARE_DIR/$relative"
+	done
 	for relative in \
 		ath12k/WCN7850/hw2.0/amss.bin \
 		ath12k/WCN7850/hw2.0/m3.bin \
@@ -279,7 +294,7 @@ build_surface_kernel_and_dtb() {
 		KERNEL_SOURCE="$KERNEL_SOURCE_DIR" \
 		KERNEL_CROSS_COMPILE= \
 		KERNEL_APPLY_PATCHES=1 \
-		KERNEL_EXTRA_FIRMWARE='ath12k/WCN7850/hw2.0/amss.bin ath12k/WCN7850/hw2.0/m3.bin ath12k/WCN7850/hw2.0/board.bin ath12k/WCN7850/hw2.0/board-2.bin regulatory.db regulatory.db.p7s' \
+		KERNEL_EXTRA_FIRMWARE="${GPU_FIRMWARE_FILES[*]} ath12k/WCN7850/hw2.0/amss.bin ath12k/WCN7850/hw2.0/m3.bin ath12k/WCN7850/hw2.0/board.bin ath12k/WCN7850/hw2.0/board-2.bin regulatory.db regulatory.db.p7s" \
 		KERNEL_EXTRA_FIRMWARE_DIR="$KERNEL_BUILTIN_FIRMWARE_DIR" \
 		SURFACE_OUTPUT_DIR="$SURFACE_OUTPUT_DIR" \
 		SURFACE_WORK_DIR="$SURFACE_WORK_DIR" \
@@ -297,7 +312,7 @@ build_surface_kernel_and_dtb() {
 }
 
 download_firmware() {
-	local relative destination url expected wifi_source
+	local relative destination url expected wifi_source gpu_source
 	log "Validating the surface-pve boot Wi-Fi firmware reference"
 	wifi_source="$WCN7850_FIRMWARE_SOURCE"
 	if [[ -n "$WCN7850_FIRMWARE_URL" ]]; then
@@ -308,6 +323,16 @@ download_firmware() {
 	[[ -n "$wifi_source" ]] || die "Wi-Fi reference source is not configured"
 	python3 "$ROOT_DIR/archlinux/prepare-wifi-firmware.py" "$wifi_source" \
 		--output "$FIRMWARE_DIR/ath12k/WCN7850/hw2.0"
+	log "Validating the surface-pve Adreno GPU firmware reference"
+	gpu_source="$GPU_FIRMWARE_SOURCE"
+	if [[ -n "$GPU_FIRMWARE_URL" ]]; then
+		gpu_source="$SHARED_DIR/surface-gpu-reference.tar.gz"
+		curl --proto '=https' --proto-redir '=https' -fL --retry 5 --max-filesize 16777216 \
+			"$GPU_FIRMWARE_URL" -o "$gpu_source"
+	fi
+	[[ -n "$gpu_source" ]] || die "GPU firmware reference source is not configured"
+	python3 "$ROOT_DIR/archlinux/prepare-gpu-firmware.py" "$gpu_source" \
+		--output "$FIRMWARE_DIR"
 	log "Downloading pinned Bluetooth firmware"
 	for relative in "${!FIRMWARE_SHA256[@]}"; do
 		destination="$FIRMWARE_DIR/$relative"
@@ -340,6 +365,8 @@ build_no_dsp_dtbs() {
 			[[ "$(fdtget "$current" "$node" status)" == disabled ]] ||
 				die "no-DSP DTB did not disable $node: $current"
 		done
+		fdtget "$current" /soc@0/gpu@3d00000/zap-shader firmware-name >/dev/null ||
+			die "no-DSP DTB lost the Surface GPU zap-shader firmware node: $current"
 	done
 }
 
@@ -366,6 +393,7 @@ build_surface_kernel_package() {
 		"$package_root/etc/kernel" \
 		"$package_root/etc/mkinitcpio.d" \
 		"$package_root/etc/mkinitcpio.conf.d" \
+		"$package_root/usr/lib/firmware/qcom" \
 		"$package_root/usr/lib/firmware/ath12k/WCN7850/hw2.0" \
 		"$package_root/usr/lib/modules"
 	install -m 0644 "$SURFACE_WORK_DIR/kernel/Image" \
@@ -409,8 +437,12 @@ EOF
 DeviceTree=/boot/surface-laptop-13.dtb
 EOF
 	cat >"$package_root/etc/mkinitcpio.conf.d/surface-laptop-13.conf" <<'EOF'
-# Keep the Surface Wi-Fi and Bluetooth firmware in every target initramfs.
+# Keep the Surface GPU, Wi-Fi, and Bluetooth firmware in every target initramfs.
 FILES+=(
+  /lib/firmware/qcom/gen71500_sqe.fw
+  /lib/firmware/qcom/gen71500_gmu.bin
+  /lib/firmware/qcom/gen71500_zap.mbn
+  /lib/firmware/qcom/x1p42100/Microsoft/Surface12/qcdxkmsucpurwa.mbn
   /lib/firmware/ath12k/WCN7850/hw2.0/amss.bin
   /lib/firmware/ath12k/WCN7850/hw2.0/m3.bin
   /lib/firmware/ath12k/WCN7850/hw2.0/board.bin
@@ -548,6 +580,7 @@ stage_profile() {
 	install -d \
 		"$PROFILE_DIR/airootfs/usr/lib/surface-laptop-13" \
 		"$PROFILE_DIR/airootfs/usr/lib/modules" \
+		"$PROFILE_DIR/airootfs/usr/lib/firmware/qcom" \
 		"$PROFILE_DIR/airootfs/usr/lib/firmware/qca" \
 		"$PROFILE_DIR/airootfs/usr/lib/firmware/ath12k/WCN7850/hw2.0" \
 		"$PROFILE_DIR/grub"
@@ -568,6 +601,12 @@ stage_profile() {
 			"$PROFILE_DIR/airootfs/usr/lib/firmware/$relative"
 		[[ -s "$PROFILE_DIR/airootfs/usr/lib/firmware/$relative" ]] ||
 			die "staged firmware is empty: $relative"
+	done
+	for relative in "${GPU_FIRMWARE_FILES[@]}"; do
+		install -D -m 0644 "$FIRMWARE_DIR/$relative" \
+			"$PROFILE_DIR/airootfs/usr/lib/firmware/$relative"
+		[[ -s "$PROFILE_DIR/airootfs/usr/lib/firmware/$relative" ]] ||
+			die "staged GPU firmware is empty: $relative"
 	done
 	python3 "$ROOT_DIR/archlinux/prepare-wifi-firmware.py" \
 		"$FIRMWARE_DIR/ath12k/WCN7850/hw2.0" \
@@ -630,6 +669,18 @@ main() {
 			"$BUILD_DIR/"*) die "Wi-Fi reference must be outside the disposable scratch directory" ;;
 		esac
 		python3 "$ROOT_DIR/archlinux/prepare-wifi-firmware.py" "$WCN7850_FIRMWARE_SOURCE"
+	fi
+	if [[ -z "$GPU_FIRMWARE_SOURCE" && -z "$GPU_FIRMWARE_URL" ]]; then
+		[[ -f "$DEFAULT_GPU_FIRMWARE_SOURCE" ]] ||
+			die "bundled GPU firmware reference is missing: $DEFAULT_GPU_FIRMWARE_SOURCE"
+		GPU_FIRMWARE_SOURCE="$DEFAULT_GPU_FIRMWARE_SOURCE"
+	fi
+	if [[ -n "$GPU_FIRMWARE_SOURCE" && -z "$GPU_FIRMWARE_URL" ]]; then
+		GPU_FIRMWARE_SOURCE=$(absolute_path "$GPU_FIRMWARE_SOURCE")
+		case "$GPU_FIRMWARE_SOURCE/" in
+			"$BUILD_DIR/"*) die "GPU firmware reference must be outside the disposable scratch directory" ;;
+		esac
+		python3 "$ROOT_DIR/archlinux/prepare-gpu-firmware.py" "$GPU_FIRMWARE_SOURCE"
 	fi
 	[[ "$(uname -m)" == aarch64 ]] || die "Arch Linux ARM ISO builds must run on an AArch64 host"
 	[[ "$(id -u)" -eq 0 ]] || die "run this builder as root (for example: sudo ./archlinux/build-iso.sh)"

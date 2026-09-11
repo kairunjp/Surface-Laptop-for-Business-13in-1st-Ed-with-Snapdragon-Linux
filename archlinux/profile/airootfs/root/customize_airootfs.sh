@@ -41,6 +41,17 @@ for firmware in amss.bin m3.bin board.bin board-2.bin; do
     fi
 done
 
+for firmware in \
+    qcom/gen71500_sqe.fw \
+    qcom/gen71500_gmu.bin \
+    qcom/gen71500_zap.mbn \
+    qcom/x1p42100/Microsoft/Surface12/qcdxkmsucpurwa.mbn; do
+    if [[ ! -s "/lib/firmware/$firmware" ]]; then
+        printf 'missing Surface GPU firmware: %s\n' "$firmware" >&2
+        exit 1
+    fi
+done
+
 # Detect package installation replacing any part of the reference set before
 # mkinitcpio copies it into the boot image.
 (
@@ -66,6 +77,18 @@ for firmware in \
     if ! lsinitcpio --early /boot/initramfs-linux.img | grep -Fq \
         "usr/lib/firmware/$firmware"; then
         printf 'Required Wi-Fi firmware is not in the early initramfs: %s\n' "$firmware" >&2
+        exit 1
+    fi
+done
+
+for firmware in \
+    qcom/gen71500_sqe.fw \
+    qcom/gen71500_gmu.bin \
+    qcom/gen71500_zap.mbn \
+    qcom/x1p42100/Microsoft/Surface12/qcdxkmsucpurwa.mbn; do
+    if ! lsinitcpio --early /boot/initramfs-linux.img | grep -Fq \
+        "usr/lib/firmware/$firmware"; then
+        printf 'Required GPU firmware is not in the early initramfs: %s\n' "$firmware" >&2
         exit 1
     fi
 done

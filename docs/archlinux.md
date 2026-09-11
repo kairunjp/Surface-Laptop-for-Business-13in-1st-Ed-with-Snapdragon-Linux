@@ -19,7 +19,12 @@ updates it with `pacman`. It fetches archiso `v90`, builds the kernel revision
 locked in `kernel/source.lock`, and obtains Bluetooth firmware from the pinned
 linux-firmware revision. Wi-Fi uses the exact files from the working
 `surface-pve` boot initramfs, validated against `drivers/firmware-manifest.json`.
-Both the live root and the early initramfs receive that same Wi-Fi set. The
+The Adreno GPU uses the exact four-file set from the same machine's firmware
+installation, including the Surface-specific signed KMS firmware. Both sets
+are copied into the live root, the early initramfs, and the kernel's built-in
+firmware directory so PCI/DRM probes cannot race the root filesystem. The
+kernel also adds the Surface compatible to the Qualcomm QSEECOM allowlist;
+otherwise the signed zap shader is rejected with `-22` after it is loaded. The
 builder also imports the official Arch Linux ARM keyring, locally signs its
 package-build key to account for the key's legacy certification, and keeps
 package signature verification enabled.
@@ -32,6 +37,14 @@ the `WCN7850_FIRMWARE_URL` repository variable). The archive must contain
 The builder checks every file's size and SHA-256 before building the kernel.
 Missing or mismatched reference inputs fail the build; it does not substitute
 another board's calibration.
+
+CI also uses the checked-in
+`build/archlinux-reference/surface-pve-gpu-reference.tar.gz` by default. A
+manual run may override it with `gpu_firmware_url` (or the `GPU_FIRMWARE_URL`
+repository variable). It must contain `gen71500_sqe.fw`, `gen71500_gmu.bin`,
+`gen71500_zap.mbn`, and
+`x1p42100/Microsoft/Surface12/qcdxkmsucpurwa.mbn` under `qcom/`. The builder
+checks every file's size and SHA-256 before staging it.
 
 The WCN7850 and regulatory blobs are also embedded into the Arch kernel with
 `CONFIG_EXTRA_FIRMWARE`. The device's built-in ath12k/MHI probe can run before
@@ -50,6 +63,7 @@ sudo apt-get install build-essential bc bison cpio device-tree-compiler \
 sudo ARCHLINUX_BUILD_DIR=/var/tmp/surface-archlinux \
   ARCHLINUX_OUTPUT_DIR="$PWD/build/archlinux" \
   WCN7850_FIRMWARE_SOURCE=/path/to/surface-pve-wifi-reference.tar.gz \
+  GPU_FIRMWARE_SOURCE=/path/to/surface-pve-gpu-reference.tar.gz \
   ./archlinux/build-iso.sh
 ```
 
@@ -61,6 +75,9 @@ kernel and archiso work trees need additional free space.
 
 `WCN7850_FIRMWARE_SOURCE` also accepts an extracted `hw2.0` directory. Validate
 it independently with `python3 archlinux/prepare-wifi-firmware.py PATH`.
+`GPU_FIRMWARE_SOURCE` accepts the checked-in GPU archive or an extracted
+directory containing its `qcom/` tree; validate it independently with
+`python3 archlinux/prepare-gpu-firmware.py PATH`.
 Keep this input outside the disposable build directory.
 
 ## Reference checked on 2026-09-09
@@ -126,7 +143,7 @@ no-DSP Surface DTB, and a mkinitcpio preset for a Surface UKI. The live
 archinstall package is patched at image-build time so `Kernels` includes
 `linux-surface-laptop-13` and selects it by default. The pacstrap wrapper
 replaces that package name with the bundled local package, then copies the
-validated Wi-Fi/Bluetooth firmware into the new root.
+validated GPU, Wi-Fi, and Bluetooth firmware into the new root.
 
 When systemd-boot UKI mode is selected, archinstall generates
 `arch-linux-surface-laptop-13.efi` with `/boot/surface-laptop-13.dtb` embedded

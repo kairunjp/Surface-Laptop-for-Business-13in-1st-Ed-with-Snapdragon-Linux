@@ -1,0 +1,5 @@
+diff --git a/drivers/firmware/qcom/qcom_scm.c b/drivers/firmware/qcom/qcom_scm.c
+--- a/drivers/firmware/qcom/qcom_scm.c
++++ b/drivers/firmware/qcom/qcom_scm.c
+@@ -2313,0 +2314,1 @@
++	{ .compatible = "microsoft,surface-laptop-13-2095" },

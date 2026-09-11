@@ -49,15 +49,18 @@ container. The kernel build is the slow part; everything else takes seconds.
 
 The `archlinux` branch contains a GitHub Actions workflow which builds a
 bootable Arch Linux ARM64 live ISO for this laptop. It runs on GitHub's native
-ARM64 runner, builds the locked kernel revision, adds the Surface DTBs and
-WCN7850 firmware, and publishes the ISO as an Actions artifact. Run it from
+ARM64 runner, builds the locked kernel revision, adds the Surface DTBs, Adreno
+firmware, and WCN7850 firmware, and publishes the ISO as an Actions artifact.
+Run it from
 the branch's Actions page with **Build Arch Linux ARM64 ISO**, or push a change
 to the branch to trigger it automatically.
 
 The working boot Wi-Fi reference archive is checked in at
 `build/archlinux-reference/surface-pve-wifi-reference.tar.gz` and is used by
-CI automatically. A manual run may override it with the `wifi_firmware_url`
-input; see [the reference requirements](docs/archlinux.md).
+CI automatically. The Surface Adreno firmware reference archive is checked in
+at `build/archlinux-reference/surface-pve-gpu-reference.tar.gz` as well. A
+manual run may override either archive with the `wifi_firmware_url` or
+`gpu_firmware_url` input; see [the reference requirements](docs/archlinux.md).
 
 The same build can be run locally on an AArch64 Arch Linux ARM host as root:
 
