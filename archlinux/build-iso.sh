@@ -385,7 +385,7 @@ build_archlinux_dtbs() {
 }
 
 build_surface_kernel_package() {
-	local kernel_release module_tree package_root package_version package_file relative installed_dtb
+	local kernel_release module_tree package_root package_version package_file relative installed_dtb checksum
 	kernel_release=$(tr -d '\n' <"$SURFACE_WORK_DIR/kernel/release")
 	module_tree="$SURFACE_WORK_DIR/modules/lib/modules/$kernel_release"
 	package_root="$SURFACE_PACKAGE_DIR/root"
@@ -404,12 +404,13 @@ build_surface_kernel_package() {
 	rm -rf -- "$SURFACE_PACKAGE_DIR"
 	install -d \
 		"$package_root/boot" \
+		"$package_root/etc/initcpio/install" \
 		"$package_root/etc/kernel" \
 		"$package_root/etc/mkinitcpio.d" \
-		"$package_root/etc/mkinitcpio.conf.d" \
 		"$package_root/usr/lib/firmware/qcom" \
 		"$package_root/usr/lib/firmware/ath12k/WCN7850/hw2.0" \
-		"$package_root/usr/lib/modules"
+		"$package_root/usr/lib/modules" \
+		"$package_root/usr/lib/surface-laptop-13"
 	install -m 0644 "$SURFACE_WORK_DIR/kernel/Image" \
 		"$package_root/boot/vmlinuz-linux-surface-laptop-13"
 	install -m 0644 "$SURFACE_WORK_DIR/dtb/surface-laptop-13-archlinux-bluetooth.dtb" \
@@ -442,7 +443,7 @@ build_surface_kernel_package() {
 		"$package_root/usr/lib/modules/$kernel_release/vmlinuz"
 
 	cat >"$package_root/etc/mkinitcpio.d/$SURFACE_PACKAGE_NAME.preset" <<EOF
-ALL_config="/etc/mkinitcpio.conf"
+ALL_config="/etc/mkinitcpio-surface-laptop-13.conf"
 ALL_kver="/boot/vmlinuz-linux-surface-laptop-13"
 
 PRESETS=('default')
@@ -459,8 +460,17 @@ EOF
 [UKI]
 DeviceTree=/boot/surface-laptop-13.dtb
 EOF
-	cat >"$package_root/etc/mkinitcpio.conf.d/surface-laptop-13.conf" <<'EOF'
-# Keep the Surface GPU, Wi-Fi, Bluetooth, and DSP firmware in every target initramfs.
+	install -m 0755 \
+		"$ROOT_DIR/archlinux/profile/airootfs/etc/initcpio/install/surface-dsp-early" \
+		"$package_root/etc/initcpio/install/surface-dsp-early"
+	cat >"$package_root/etc/mkinitcpio-surface-laptop-13.conf" <<'EOF'
+# Include the distribution defaults, then add the Surface-specific firmware.
+source /etc/mkinitcpio.conf
+
+# The ADSP/CDSP drivers are built in and probe before the real root is
+# available. The custom hook places their firmware in the early CPIO.
+HOOKS+=(surface-dsp-early)
+
 FILES+=(
   /lib/firmware/qcom/gen71500_sqe.fw
   /lib/firmware/qcom/gen71500_gmu.bin
@@ -478,12 +488,16 @@ FILES+=(
 )
 EOF
 	{
+		: >"$package_root/usr/lib/surface-laptop-13/dsp-firmware.list"
 		printf 'FILES+=(\n'
 		for relative in "${DSP_FIRMWARE_FILES[@]}"; do
+			checksum=$(sha256sum "$FIRMWARE_DIR/$relative" | awk '{print $1}')
+			printf '%s  %s\n' "$checksum" "$relative" \
+				>>"$package_root/usr/lib/surface-laptop-13/dsp-firmware.list"
 			printf '  /lib/firmware/%s\n' "$relative"
 		done
 		printf ')\n'
-	} >>"$package_root/etc/mkinitcpio.conf.d/surface-laptop-13.conf"
+	} >>"$package_root/etc/mkinitcpio-surface-laptop-13.conf"
 	cat >"$SURFACE_PACKAGE_DIR/PKGBUILD" <<EOF
 pkgname=$SURFACE_PACKAGE_NAME
 pkgver=$package_version
