@@ -362,19 +362,18 @@ download_firmware() {
 }
 
 build_archlinux_dtbs() {
-	local current bluetooth
-	current="$SURFACE_WORK_DIR/dtb/surface-laptop-13-current.dtb"
+	local bluetooth current
 	bluetooth="$SURFACE_WORK_DIR/dtb/surface-laptop-13-bluetooth.dtb"
 	# build.sh already produces the full EL1 DTB used by the main branch.
 	# The Arch image used to apply x1p-el2-no-dsp.dtso unconditionally, which
 	# removed the ADSP/PMIC GLINK transport and left qcom_battmgr in -EAGAIN.
-	log "Using the main-branch DSP-enabled DTB for battery communication"
-	cp -- "$current" \
-		"$SURFACE_WORK_DIR/dtb/surface-laptop-13-archlinux.dtb"
+	# The Bluetooth variant is based on that same DSP-enabled DTB and also
+	# enables the WCN7850 UART. Use it for both the live image and the
+	# installed target so Bluetooth does not disappear after archinstall.
+	log "Using the main-branch DSP-enabled Bluetooth DTB"
 	cp -- "$bluetooth" \
 		"$SURFACE_WORK_DIR/dtb/surface-laptop-13-archlinux-bluetooth.dtb"
 	for current in \
-		"$SURFACE_WORK_DIR/dtb/surface-laptop-13-archlinux.dtb" \
 		"$SURFACE_WORK_DIR/dtb/surface-laptop-13-archlinux-bluetooth.dtb"; do
 		for node in /soc@0/remoteproc@6800000 /soc@0/remoteproc@32300000; do
 			[[ "$(fdtget "$current" "$node" status)" == okay ]] ||
@@ -386,7 +385,7 @@ build_archlinux_dtbs() {
 }
 
 build_surface_kernel_package() {
-	local kernel_release module_tree package_root package_version package_file relative
+	local kernel_release module_tree package_root package_version package_file relative installed_dtb
 	kernel_release=$(tr -d '\n' <"$SURFACE_WORK_DIR/kernel/release")
 	module_tree="$SURFACE_WORK_DIR/modules/lib/modules/$kernel_release"
 	package_root="$SURFACE_PACKAGE_DIR/root"
@@ -413,8 +412,17 @@ build_surface_kernel_package() {
 		"$package_root/usr/lib/modules"
 	install -m 0644 "$SURFACE_WORK_DIR/kernel/Image" \
 		"$package_root/boot/vmlinuz-linux-surface-laptop-13"
-	install -m 0644 "$SURFACE_WORK_DIR/dtb/surface-laptop-13-archlinux.dtb" \
+	install -m 0644 "$SURFACE_WORK_DIR/dtb/surface-laptop-13-archlinux-bluetooth.dtb" \
 		"$package_root/boot/surface-laptop-13.dtb"
+	installed_dtb="$package_root/boot/surface-laptop-13.dtb"
+	[[ "$(fdtget "$installed_dtb" /soc@0/remoteproc@6800000 status)" == okay ]] ||
+		die "installed target DTB does not enable the ADSP: $installed_dtb"
+	[[ "$(fdtget "$installed_dtb" /soc@0/remoteproc@32300000 status)" == okay ]] ||
+		die "installed target DTB does not enable the CDSP: $installed_dtb"
+	[[ "$(fdtget "$installed_dtb" /soc@0/geniqup@ac0000/serial@a98000 status)" == okay ]] ||
+		die "installed target DTB does not enable the Bluetooth UART: $installed_dtb"
+	[[ "$(fdtget "$installed_dtb" /soc@0/geniqup@ac0000/serial@a98000/bluetooth compatible)" == qcom,wcn7850-bt ]] ||
+		die "installed target DTB is missing the WCN7850 Bluetooth node: $installed_dtb"
 	# Keep firmware out of the package itself. linux-firmware may already own
 	# board.bin on newer Arch Linux ARM snapshots, which would make pacman -U
 	# reject this package with a file conflict. The pacstrap wrapper installs
@@ -643,8 +651,6 @@ stage_profile() {
 		"$FIRMWARE_DIR/ath12k/WCN7850/hw2.0" \
 		--output "$PROFILE_DIR/airootfs/usr/lib/firmware/ath12k/WCN7850/hw2.0" \
 		>"$PROFILE_DIR/airootfs/usr/lib/surface-laptop-13/wifi-sha256sums"
-	cp "$SURFACE_WORK_DIR/dtb/surface-laptop-13-archlinux.dtb" \
-		"$PROFILE_DIR/grub/surface-laptop-13-archlinux.dtb"
 	cp "$SURFACE_WORK_DIR/dtb/surface-laptop-13-archlinux-bluetooth.dtb" \
 		"$PROFILE_DIR/grub/surface-laptop-13-archlinux-bluetooth.dtb"
 }

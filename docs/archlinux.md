@@ -168,7 +168,9 @@ initramfs settings while adding the UKI output entries expected by archinstall.
 
 The ISO also carries a local `linux-surface-laptop-13` package. It contains
 the same Surface kernel image and modules used by the live environment, the
-selected Surface DTB, and a mkinitcpio preset for a Surface UKI. The live
+Bluetooth- and DSP-enabled Surface DTB, and a mkinitcpio preset for a Surface
+UKI. The live ISO exposes only the Bluetooth + battery communication GRUB
+entry, and the same DTB is installed into the target system. The live
 archinstall package is patched at image-build time so `Kernels` includes
 `linux-surface-laptop-13` and selects it by default. The pacstrap wrapper
 copies and checksum-verifies the validated GPU, Wi-Fi, Bluetooth, and ADSP/CDSP

@@ -78,20 +78,22 @@ jobs:
           grep -Fq '/arch/boot/aarch64/initramfs-linux.img' <<<"$boot_files"
           dtb_files=$(xorriso -indev "$iso" -find /boot/grub -type f -exec lsdl --)
           printf '%s\n' "$dtb_files"
-          grep -Fq 'surface-laptop-13-archlinux.dtb' <<<"$dtb_files"
           grep -Fq 'surface-laptop-13-archlinux-bluetooth.dtb' <<<"$dtb_files"
+          ! grep -Fq 'surface-laptop-13-archlinux.dtb' <<<"$dtb_files"
 
-      - name: Verify selected battery DTB mode
+      - name: Verify selected Bluetooth and battery DTB mode
         run: |
           iso=$(find build/archlinux -maxdepth 1 -type f -name '*.iso' -print -quit)
           test -n "$iso"
-          dtb="$RUNNER_TEMP/surface-laptop-13-archlinux.dtb"
+          dtb="$RUNNER_TEMP/surface-laptop-13-archlinux-bluetooth.dtb"
           xorriso -osirrox on -indev "$iso" \
-            -extract /boot/grub/surface-laptop-13-archlinux.dtb "$dtb"
+            -extract /boot/grub/surface-laptop-13-archlinux-bluetooth.dtb "$dtb"
           expected=okay
           for node in /soc@0/remoteproc@6800000 /soc@0/remoteproc@32300000; do
             test "$(fdtget "$dtb" "$node" status)" = "$expected"
           done
+          test "$(fdtget "$dtb" /soc@0/geniqup@ac0000/serial@a98000 status)" = okay
+          test "$(fdtget "$dtb" /soc@0/geniqup@ac0000/serial@a98000/bluetooth compatible)" = qcom,wcn7850-bt
 
       - name: Upload ISO artifact
         uses: actions/upload-artifact@v4
