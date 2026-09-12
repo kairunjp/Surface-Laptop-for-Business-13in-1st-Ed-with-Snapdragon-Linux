@@ -71,12 +71,13 @@ sudo ./archlinux/build-iso.sh
 The scratch directory must have several GiB free; set
 `ARCHLINUX_BUILD_DIR` and `ARCHLINUX_OUTPUT_DIR` to change its locations. The
 ISO uses the main-branch DSP-enabled DTB by default, so the Qualcomm PMIC GLINK
-battery/charger service is available. The four required DSP files are kept in
-`archlinux/firmware-tree/`, validated against
-`drivers/firmware-manifest.json`, and copied into the live root, installed
-target, and early initramfs. The DSP files are also built into the kernel so
-remoteproc can find them even if the boot medium supplies an incomplete
-initramfs. The CI build verifies the initramfs used by the ISO boot path.
+battery/charger service and the X1P42100 AudioReach sound card are available.
+The four remoteproc files and the required audio topology are kept in
+`archlinux/firmware-tree/`, validated against `drivers/firmware-manifest.json`,
+and copied into the live root, installed target, and early initramfs. The files
+are also built into the kernel so remoteproc and the built-in sound driver can
+find them even if the boot medium supplies an incomplete initramfs. The CI build
+verifies the initramfs used by the ISO boot path.
 Secure Boot may need to be disabled because the development kernel and GRUB
 payload are unsigned.
 
@@ -333,9 +334,10 @@ Fingerprint userspace setup (libfprint patch, fprintd) is documented in
 ## Firmware note
 
 Qualcomm firmware files are listed with SHA256 hashes in
-`drivers/firmware-manifest.json`. This repository includes the Surface
-ADSP/CDSP files required for battery communication; check your redistribution
-rights before publishing or mirroring the binaries.
+`drivers/firmware-manifest.json`. This repository includes the Surface ADSP/CDSP
+files required for battery communication and the AudioReach topology required
+by the sound driver; check your redistribution rights before publishing or
+mirroring the binaries.
 
 ### Live Surface boot comparison (2026-09-07)
 

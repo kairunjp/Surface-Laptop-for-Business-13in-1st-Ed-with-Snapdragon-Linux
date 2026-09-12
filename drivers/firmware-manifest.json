@@ -24,6 +24,10 @@
       "bytes": 3195304,
       "sha256": "4a67a03367f2eff2f8a0e867ca25d2bf2fcd5aee3e41e2c9f436c804e257c789"
     },
+    "qcom/x1e80100/X1P42100-Microsoft-Surface-Laptop-13-tplg.bin": {
+      "bytes": 11320,
+      "sha256": "89b731f3f98fc2b84699bca39a56e390925a44a26d5aea80382cf617e00c08d8"
+    },
     "qcom/x1p42100/Microsoft/SurfaceLaptop13/qcdxkmsucpurwa.mbn": {
       "bytes": 12088,
       "sha256": "de957e0a25c2a42f417f8e95ccf1cbdfeed5a4a6d77a84e215389b8b78fc8bf4"
@@ -93,6 +97,6 @@
       "sha256": "facca00c7cbc988d843776f8b8f8f7926f24007a1cfc540d2219a005f596114f"
     }
   },
-  "note": "The WCN7850 Wi-Fi files in build/archlinux-reference/surface-pve-wifi-reference.tar.gz are validated reference inputs copied from surface-pve. The GPU set in build/archlinux-reference/surface-laptop13-gpu-reference.tar.gz combines gen71500 firmware from linux-firmware with the device-specific qcdxkmsucpurwa.mbn extracted from Microsoft's SurfaceLaptop_13in_1st_Edition_Win11_26100_26.080.5528.0.msi. The Surface ADSP/CDSP set under archlinux/firmware-tree is required by the main-branch EL1 DTB for battery/charger communication. Verify all hashes and vendor redistribution terms before changing or publishing these files. Bluetooth files remain downloaded from the pinned linux-firmware revision by the builders.",
+  "note": "The WCN7850 Wi-Fi files in build/archlinux-reference/surface-pve-wifi-reference.tar.gz are validated reference inputs copied from surface-pve. The GPU set in build/archlinux-reference/surface-laptop13-gpu-reference.tar.gz combines gen71500 firmware from linux-firmware with the device-specific qcdxkmsucpurwa.mbn extracted from Microsoft's SurfaceLaptop_13in_1st_Edition_Win11_26100_26.080.5528.0.msi. The Surface ADSP/CDSP files under archlinux/firmware-tree are required by the main-branch EL1 DTB for battery/charger communication. The AudioReach topology is the redistributable X1P42100 Surface Pro 12in topology from linux-firmware, stored under the model-specific filename required by this Surface Laptop 13 DTB. Verify all hashes and vendor redistribution terms before changing or publishing these files. Bluetooth files remain downloaded from the pinned linux-firmware revision by the builders.",
   "schema": 1
 }

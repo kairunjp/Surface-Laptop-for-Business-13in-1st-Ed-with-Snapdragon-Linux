@@ -48,12 +48,15 @@ manual run may override it explicitly with `gpu_firmware_url`. It must contain
 and `x1p42100/Microsoft/SurfaceLaptop13/qcdxkmsucpurwa.mbn` under `qcom/`.
 The builder checks every file's size and SHA-256 before staging it.
 
-The workflow also uses the committed Surface ADSP/CDSP firmware tree under
-`archlinux/firmware-tree/`. Its four files are checked against
-`drivers/firmware-manifest.json` and are embedded in the kernel as well as
-staged into the live root, target root, and early initramfs. CI therefore
-builds the battery-capable, DSP-enabled DTB without an additional URL or
-manual input. The build verifies the initramfs that archiso places at
+The workflow also uses the committed Surface ADSP/CDSP and AudioReach
+firmware tree under `archlinux/firmware-tree/`. Its five files are checked
+against `drivers/firmware-manifest.json` and are embedded in the kernel as
+well as staged into the live root, target root, and early initramfs. The
+AudioReach topology is stored under the exact model-specific filename that
+the X1P42100 sound driver requests; its contents come from the redistributable
+Surface Pro 12in topology in linux-firmware. CI therefore builds the
+battery-capable, audio-enabled DSP DTB without an additional URL or manual
+input. The build verifies the initramfs that archiso places at
 `arch/boot/aarch64/initramfs-linux.img`, not only the copy in the live root.
 
 The WCN7850 and regulatory blobs are also embedded into the Arch kernel with
@@ -117,10 +120,10 @@ Arch boot and network association still require testing on the target.
 By default, the ISO contains two menu entries: the default touchscreen/USB
 entry and a Bluetooth-enabled entry. Both use the main-branch DSP-enabled EL1
 DTB with ADSP and CDSP active for PMIC GLINK battery/charger communication.
-The committed DSP firmware is included in the live root, early initramfs, and
-installed target. Wi-Fi uses the reference set above; Bluetooth uses downloaded
-QCA firmware. The output is an unsigned development image; disable Secure
-Boot before booting it.
+The committed DSP/audio firmware is included in the live root, early initramfs,
+and installed target. Wi-Fi uses the reference set above; Bluetooth uses
+downloaded QCA firmware. The output is an unsigned development image; disable
+Secure Boot before booting it.
 
 The ISO is a live environment, not an unattended disk installer. Log in as
 `root` at the console and use the included `archinstall` command. The live
@@ -136,13 +139,14 @@ the first package is downloaded. The installed system therefore remains on
 `SigLevel = Required DatabaseOptional` for both installation and later
 `pacman -Syu`; package signature checks are not disabled.
 
-The battery-capable DTB and firmware are the default. The committed tree is:
+The battery- and audio-capable DTB and firmware are the default. The
+committed tree is:
 
 ```text
-archlinux/firmware-tree/qcom/x1p42100/Microsoft/Surface12/
+archlinux/firmware-tree/
 ```
 
-It contains these files:
+It contains the four remoteproc files:
 
 ```text
 qcom/x1p42100/Microsoft/Surface12/qcadsp8380.mbn
@@ -151,9 +155,15 @@ qcom/x1p42100/Microsoft/Surface12/qccdsp8380.mbn
 qcom/x1p42100/Microsoft/Surface12/cdsp_dtbs.elf
 ```
 
+and the AudioReach topology:
+
+```text
+qcom/x1e80100/X1P42100-Microsoft-Surface-Laptop-13-tplg.bin
+```
+
 For a local build using another extracted tree, set
 `DSP_FIRMWARE_SOURCE=/path/to/firmware-tree`; CI uses the committed tree
-automatically. The builder validates all four files against the recorded
+automatically. The builder validates all five files against the recorded
 sizes and SHA-256 hashes before generating the image.
 
 The image also enables `surface-wifi-reprobe.service`. It retries the WCN7850
@@ -170,14 +180,14 @@ initramfs settings while adding the UKI output entries expected by archinstall.
 
 The ISO also carries a local `linux-surface-laptop-13` package. It contains
 the same Surface kernel image and modules used by the live environment, the
-Bluetooth- and DSP-enabled Surface DTB, and a mkinitcpio preset for a Surface
+Bluetooth-, battery-, and audio-enabled Surface DTB, and a mkinitcpio preset for a Surface
 UKI. The live ISO exposes only the Bluetooth + battery communication GRUB
 entry, and the same DTB is installed into the target system. The live
 archinstall package is patched at image-build time so `Kernels` includes
 `linux-surface-laptop-13` and selects it by default. The pacstrap wrapper
-copies and checksum-verifies the validated GPU, Wi-Fi, Bluetooth, and ADSP/CDSP
-firmware into the new root *before* installing the bundled local kernel
-package. Its mkinitcpio settings therefore include the required Surface
+copies and checksum-verifies the validated GPU, Wi-Fi, Bluetooth, ADSP/CDSP,
+and AudioReach firmware into the new root *before* installing the bundled
+local kernel package. Its mkinitcpio settings therefore include the required Surface
 firmware in the first installed initramfs.
 
 When systemd-boot UKI mode is selected, archinstall generates

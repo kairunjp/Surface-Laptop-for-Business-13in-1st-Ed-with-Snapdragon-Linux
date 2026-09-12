@@ -13,6 +13,6 @@ build() {
 
 help() {
   cat <<HELPEOF
-Adds the optional Surface ADSP/CDSP firmware to the early initramfs.
+Adds the Surface ADSP/CDSP and AudioReach firmware to the early initramfs.
 HELPEOF
 }

@@ -18,9 +18,10 @@ WCN7850_FIRMWARE_URL=${WCN7850_FIRMWARE_URL:-}
 GPU_FIRMWARE_SOURCE=${GPU_FIRMWARE_SOURCE:-}
 GPU_FIRMWARE_URL=${GPU_FIRMWARE_URL:-}
 # The main-branch EL1 DTB enables the Surface ADSP/CDSP path used by the
-# Qualcomm PMIC GLINK battery service. Keep the device-specific files in the
-# repository's explicit firmware tree so CI and local builds use the same DTB
-# and firmware set. Callers may override this with another extracted tree.
+# Qualcomm PMIC GLINK battery service and the X1E80100 AudioReach sound card.
+# Keep the device-specific files in the repository's explicit firmware tree so
+# CI and local builds use the same DTB and firmware set. Callers may override
+# this with another extracted tree.
 DSP_FIRMWARE_SOURCE=${DSP_FIRMWARE_SOURCE:-}
 SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-$(date +%s)}
 DEFAULT_WCN7850_FIRMWARE_SOURCE="$ROOT_DIR/build/archlinux-reference/surface-pve-wifi-reference.tar.gz"
@@ -72,6 +73,7 @@ DSP_FIRMWARE_FILES=(
 	qcom/x1p42100/Microsoft/Surface12/adsp_dtbs.elf
 	qcom/x1p42100/Microsoft/Surface12/qccdsp8380.mbn
 	qcom/x1p42100/Microsoft/Surface12/cdsp_dtbs.elf
+	qcom/x1e80100/X1P42100-Microsoft-Surface-Laptop-13-tplg.bin
 )
 
 MOUNTS=()
@@ -278,7 +280,7 @@ download_kernel() {
 
 build_surface_kernel_and_dtb() {
 	local relative source
-	log "Staging firmware for the built-in early Wi-Fi, GPU, and DSP loaders"
+	log "Staging firmware for the built-in early Wi-Fi, GPU, DSP, and audio loaders"
 	rm -rf -- "$KERNEL_BUILTIN_FIRMWARE_DIR"
 	install -d "$KERNEL_BUILTIN_FIRMWARE_DIR"
 	for relative in "${GPU_FIRMWARE_FILES[@]}"; do
@@ -350,7 +352,7 @@ download_firmware() {
 	[[ -n "$gpu_source" ]] || die "GPU firmware reference source is not configured"
 	python3 "$ROOT_DIR/archlinux/prepare-gpu-firmware.py" "$gpu_source" \
 		--output "$FIRMWARE_DIR"
-	log "Staging the Surface DSP/remoteproc firmware for the battery service"
+	log "Staging the Surface DSP/AudioReach firmware for battery and audio"
 	python3 "$ROOT_DIR/archlinux/prepare-dsp-firmware.py" \
 		"$DSP_FIRMWARE_SOURCE" --output "$FIRMWARE_DIR"
 	log "Downloading pinned Bluetooth firmware"

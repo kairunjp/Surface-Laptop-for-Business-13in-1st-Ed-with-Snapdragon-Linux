@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate and stage the Surface ADSP/CDSP firmware set."""
+"""Validate and stage Surface ADSP/CDSP and AudioReach firmware."""
 
 import argparse
 import hashlib
@@ -13,6 +13,7 @@ FILES = (
     "qcom/x1p42100/Microsoft/Surface12/adsp_dtbs.elf",
     "qcom/x1p42100/Microsoft/Surface12/qccdsp8380.mbn",
     "qcom/x1p42100/Microsoft/Surface12/cdsp_dtbs.elf",
+    "qcom/x1e80100/X1P42100-Microsoft-Surface-Laptop-13-tplg.bin",
 )
 MANIFEST = Path(__file__).resolve().parents[1] / "drivers/firmware-manifest.json"
 

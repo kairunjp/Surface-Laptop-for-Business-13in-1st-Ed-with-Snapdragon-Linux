@@ -51,9 +51,9 @@ for firmware in \
     fi
 done
 
-# The battery-capable DTB boots the Surface ADSP/CDSP through remoteproc.
-# Validate the staged firmware set before mkinitcpio creates the live
-# initramfs.
+# The battery/audio-capable DTB boots the Surface ADSP/CDSP through remoteproc
+# and instantiates the AudioReach sound card. Validate the staged firmware set
+# before mkinitcpio creates the live initramfs.
 if [[ -f "$surface_root/dsp-firmware.list" ]]; then
     while read -r checksum relative; do
         [[ -n "$checksum" && -n "$relative" ]] || continue
