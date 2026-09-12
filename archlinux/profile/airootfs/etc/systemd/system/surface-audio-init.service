@@ -1,0 +1,14 @@
+[Unit]
+Description=Initialize Surface Laptop 13 audio controls
+After=systemd-udev-settle.service sound.target
+Wants=sound.target
+ConditionPathExists=/sys/class/sound
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/surface-audio-init
+TimeoutStartSec=75s
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

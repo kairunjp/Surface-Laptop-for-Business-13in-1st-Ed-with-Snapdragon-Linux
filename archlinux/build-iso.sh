@@ -386,6 +386,12 @@ build_archlinux_dtbs() {
 			[[ "$(fdtget "$current" "$node" status)" == okay ]] ||
 				die "DSP-enabled DTB did not enable $node: $current"
 		done
+		[[ "$(fdtget "$current" /soc@0/codec@6d44000 qcom,dmic-sample-rate)" == 2400000 ]] ||
+			die "Arch DTB does not contain the 2.4 MHz Surface DMIC fix: $current"
+		fdtget "$current" /soc@0/codec@6d44000 vdd-micb-supply >/dev/null ||
+			die "Arch DTB does not contain the Surface microphone-bias supply: $current"
+		[[ "$(fdtget "$current" /soc@0/rsc@17500000/regulators-0/ldo1 regulator-name)" == vreg_l1b_1p8 ]] ||
+			die "Arch DTB does not contain PM8550-B microphone-bias LDO1: $current"
 		fdtget "$current" /soc@0/gpu@3d00000/zap-shader firmware-name >/dev/null ||
 			die "Arch DTB lost the Surface GPU zap-shader firmware node: $current"
 	done
@@ -414,10 +420,12 @@ build_surface_kernel_package() {
 		"$package_root/etc/initcpio/install" \
 		"$package_root/etc/kernel" \
 		"$package_root/etc/mkinitcpio.d" \
+		"$package_root/etc/systemd/system" \
 		"$package_root/usr/lib/firmware/qcom" \
 		"$package_root/usr/lib/firmware/ath12k/WCN7850/hw2.0" \
 		"$package_root/usr/lib/modules" \
-		"$package_root/usr/lib/surface-laptop-13"
+		"$package_root/usr/lib/surface-laptop-13" \
+		"$package_root/usr/local/sbin"
 	install -m 0644 "$SURFACE_WORK_DIR/kernel/Image" \
 		"$package_root/boot/vmlinuz-linux-surface-laptop-13"
 	install -m 0644 "$SURFACE_WORK_DIR/dtb/surface-laptop-13-archlinux-bluetooth.dtb" \
@@ -431,6 +439,12 @@ build_surface_kernel_package() {
 		die "installed target DTB does not enable the Bluetooth UART: $installed_dtb"
 	[[ "$(fdtget "$installed_dtb" /soc@0/geniqup@ac0000/serial@a98000/bluetooth compatible)" == qcom,wcn7850-bt ]] ||
 		die "installed target DTB is missing the WCN7850 Bluetooth node: $installed_dtb"
+	[[ "$(fdtget "$installed_dtb" /soc@0/codec@6d44000 qcom,dmic-sample-rate)" == 2400000 ]] ||
+		die "installed target DTB does not contain the 2.4 MHz Surface DMIC fix: $installed_dtb"
+	fdtget "$installed_dtb" /soc@0/codec@6d44000 vdd-micb-supply >/dev/null ||
+		die "installed target DTB does not contain the Surface microphone-bias supply: $installed_dtb"
+	[[ "$(fdtget "$installed_dtb" /soc@0/rsc@17500000/regulators-0/ldo1 regulator-name)" == vreg_l1b_1p8 ]] ||
+		die "installed target DTB does not contain PM8550-B microphone-bias LDO1: $installed_dtb"
 	# Keep firmware out of the package itself. linux-firmware may already own
 	# board.bin on newer Arch Linux ARM snapshots, which would make pacman -U
 	# reject this package with a file conflict. The pacstrap wrapper installs
@@ -470,6 +484,12 @@ EOF
 	install -m 0755 \
 		"$ROOT_DIR/archlinux/profile/airootfs/etc/initcpio/install/surface-dsp-early" \
 		"$package_root/etc/initcpio/install/surface-dsp-early"
+	install -m 0644 \
+		"$ROOT_DIR/archlinux/profile/airootfs/etc/systemd/system/surface-audio-init.service" \
+		"$package_root/etc/systemd/system/surface-audio-init.service"
+	install -m 0755 \
+		"$ROOT_DIR/archlinux/profile/airootfs/usr/local/sbin/surface-audio-init" \
+		"$package_root/usr/local/sbin/surface-audio-init"
 	cat >"$package_root/etc/mkinitcpio-surface-laptop-13.conf" <<'EOF'
 # Include the distribution defaults, then add the Surface-specific firmware.
 source /etc/mkinitcpio.conf
@@ -512,7 +532,7 @@ pkgrel=1
 pkgdesc='Surface Laptop 13 custom Linux kernel, modules, DTB, and boot preset'
 arch=('aarch64')
 license=('GPL-2.0-only')
-depends=('alsa-ucm-conf' 'mkinitcpio' 'systemd' 'systemd-ukify' 'wireless-regdb')
+depends=('alsa-utils' 'alsa-ucm-conf' 'mkinitcpio' 'systemd' 'systemd-ukify' 'wireless-regdb')
 provides=('linux')
 
 package() {

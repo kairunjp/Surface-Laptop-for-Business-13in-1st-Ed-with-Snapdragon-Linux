@@ -94,6 +94,9 @@ jobs:
           done
           test "$(fdtget "$dtb" /soc@0/geniqup@ac0000/serial@a98000 status)" = okay
           test "$(fdtget "$dtb" /soc@0/geniqup@ac0000/serial@a98000/bluetooth compatible)" = qcom,wcn7850-bt
+          test "$(fdtget "$dtb" /soc@0/codec@6d44000 qcom,dmic-sample-rate)" = 2400000
+          fdtget "$dtb" /soc@0/codec@6d44000 vdd-micb-supply >/dev/null
+          test "$(fdtget "$dtb" /soc@0/rsc@17500000/regulators-0/ldo1 regulator-name)" = vreg_l1b_1p8
 
       - name: Upload ISO artifact
         uses: actions/upload-artifact@v4

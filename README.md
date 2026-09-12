@@ -22,8 +22,9 @@ Tested on the actual machine:
   matching work through fprintd with a small libfprint patch
 
 Known limitations: suspend reboots instead of resuming, the internal speaker
-works but the 3.5mm jack needs more DT work before it is safe to enable, and
-the internal microphone has never worked.
+and internal microphone fixes are included in the current Arch image but still
+need a reboot and physical hardware confirmation; the 3.5mm jack needs more
+DT work before it is safe to enable.
 
 
 ## Building

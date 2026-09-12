@@ -1,0 +1,126 @@
+#!/usr/bin/env bash
+set -u
+
+log() {
+	printf 'surface-audio-init: %s\n' "$*"
+}
+
+find_card() {
+	local id directory card_name
+	for id in /sys/class/sound/card*/id; do
+		[[ -r "$id" ]] || continue
+		[[ "$(<"$id")" == X1P42100Microso ]] || continue
+		directory=${id%/id}
+		card_name=${directory##*/}
+		card_index=${card_name#card}
+		[[ "$card_index" =~ ^[0-9]+$ ]] || return 1
+		return 0
+	done
+	return 1
+}
+
+soundwire_speakers_ready() {
+	local status
+	local -a statuses
+	shopt -s nullglob
+	statuses=(/sys/bus/soundwire/devices/sdw:*:0:0217:0204:00:*/status)
+	# Return a distinct status when this kernel does not expose SoundWire
+	# status files, so that an alternate device naming scheme does not add a
+	# needless 20-second boot wait.
+	(( ${#statuses[@]} > 0 )) || return 2
+	(( ${#statuses[@]} >= 2 )) || return 1
+	for status in "${statuses[@]}"; do
+		[[ "$(<"$status")" == Attached ]] || return 1
+	done
+}
+
+set_simple() {
+	local name=$1 value=$2
+	if ! amixer -q -c "$card_index" sset "$name" "$value" >/dev/null 2>&1; then
+		log "could not set simple control: $name=$value"
+		failures=$((failures + 1))
+	fi
+}
+
+set_control() {
+	local name=$1 value=$2
+	if ! amixer -q -c "$card_index" cset "name='$name'" "$value" >/dev/null 2>&1; then
+		log "could not set control: $name=$value"
+		failures=$((failures + 1))
+	fi
+}
+
+card_index=
+for ((attempt = 1; attempt <= 60; attempt++)); do
+	if find_card; then
+		# SoundWire can appear shortly after the ALSA card. Wait for both
+		# speaker amplifiers when their status nodes are available, but do not
+		# block audio forever on a kernel that exposes different status paths.
+		if soundwire_speakers_ready; then
+			break
+		else
+			soundwire_status=$?
+		fi
+		if (( soundwire_status == 2 || attempt >= 20 )); then
+			break
+		fi
+	fi
+	if (( attempt == 60 )); then
+		log "Surface audio ALSA card did not appear"
+		exit 1
+	fi
+	sleep 1
+done
+
+failures=0
+
+# Enable both channels. A one-value UCM cset only enables the left channel
+# for these Qualcomm mixer controls, which is why use `sset on,on` here.
+set_simple 'WSA_CODEC_DMA_RX_0 Audio Mixer MultiMedia1' on,on
+set_simple 'MultiMedia2 Mixer VA_CODEC_DMA_TX_0' on,on
+
+# AudioReach stream gain was 8192/65535 on the machine and made playback
+# barely audible. Keep the user-facing PipeWire volume independent from this
+# hardware initialization gain.
+set_control 'stream0.vol_ctrl0 MultiMedia1 Playback Volu' 65535
+
+set_simple 'WSA WSA RX0 MUX' AIF1_PB
+set_simple 'WSA WSA RX1 MUX' AIF1_PB
+set_simple 'WSA WSA_RX0 INP0' RX0
+set_simple 'WSA WSA_RX1 INP0' RX1
+set_simple 'WSA WSA_RX0 Digital' 81
+set_simple 'WSA WSA_RX1 Digital' 81
+set_simple 'WSA WSA_RX0 Digital Mute' off
+set_simple 'WSA WSA_RX1 Digital Mute' off
+
+for side in SpkrLeft SpkrRight; do
+	set_simple "$side COMP" on
+	set_simple "$side BOOST" on
+	set_simple "$side DAC" on
+	set_simple "$side PBR" on
+	set_simple "$side VISENSE" off
+	set_simple "$side CPS" off
+	set_simple "$side WSA MODE" Speaker
+	set_simple "$side PA" 6
+done
+
+# Select the two internal DMICs, route them to VA capture, and use the
+# measured 0 dB microphone gain used by the known-good X1-family profile.
+set_simple 'VA DEC0 MUX' VA_DMIC
+set_simple 'VA DMIC MUX0' DMIC0
+set_simple 'VA_AIF1_CAP Mixer DEC0' on
+set_simple 'VA_DEC0' 84
+set_simple 'VA DEC1 MUX' VA_DMIC
+set_simple 'VA DMIC MUX1' DMIC1
+set_simple 'VA_AIF1_CAP Mixer DEC1' on
+set_simple 'VA_DEC1' 84
+
+set_simple 'WSA WSA_COMP1' off
+set_simple 'WSA WSA_COMP2' off
+
+if (( failures > 0 )); then
+	log "audio initialization completed with $failures optional control failures"
+else
+	log "audio controls initialized on card $card_index"
+fi
+exit 0

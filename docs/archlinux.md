@@ -125,11 +125,14 @@ and installed target. Wi-Fi uses the reference set above; Bluetooth uses
 downloaded QCA firmware. The output is an unsigned development image; disable
 Secure Boot before booting it.
 
-The live profile also includes an ALSA UCM2 card-name mapping for this exact
-Surface model. It reuses the matching Surface Pro 12in X1E80100 codec routes,
-which enables WirePlumber to create the physical speaker and microphone nodes;
-the base `alsa-ucm-conf` package and this mapping are copied into the target
-root during archinstall as well.
+The live profile includes an ALSA UCM2 card-name mapping and a machine-specific
+profile for this exact Surface model. The profile initializes the AudioReach
+playback gain, both WSA884x speaker amplifiers, and the VA DMIC routes; the
+`surface-audio-init.service` reapplies those controls after the ALSA/SoundWire
+devices appear. The base `alsa-ucm-conf`, `alsa-utils`, mapping, profile, and
+service are copied into the target root during archinstall as well. The new
+DMIC regulator, pinctrl, and 2.4 MHz clock settings are validated in every
+DTB variant produced by the builder.
 
 The ISO is a live environment, not an unattended disk installer. Log in as
 `root` at the console and use the included `archinstall` command. The live
@@ -175,6 +178,9 @@ sizes and SHA-256 hashes before generating the image.
 The image also enables `surface-wifi-reprobe.service`. It retries the WCN7850
 PCI probe after the live root and its firmware are available, covering boots
 where the built-in `ath12k` driver probes too early during initramfs startup.
+The laptop exposes TPM firmware tables but no `/dev/tpm0` or `/dev/tpmrm0`
+device. The live root and the installed target mask `tpm2.target` for this
+hardware, avoiding systemd's 90-second wait for nonexistent TPM device nodes.
 
 Arch Linux ARM installs its kernel preset as `linux-aarch64.preset`, whereas
 archinstall's default `linux` entry expects `linux.preset` when UKI boot is

@@ -129,6 +129,7 @@ check_inputs() {
 	[[ -f "$PUBLIC_DIR/device-tree/overlays/touchscreen.dtso" ]] || die "public touchscreen overlay missing"
 	[[ -f "$PUBLIC_DIR/device-tree/overlays/bluetooth.dtso" ]] || die "public Bluetooth overlay missing"
 	[[ -f "$PUBLIC_DIR/device-tree/overlays/fingerprint-usb.dtso" ]] || die "public fingerprint USB overlay missing"
+	[[ -f "$PUBLIC_DIR/device-tree/overlays/surface-laptop-13-audio.dtso" ]] || die "public Surface audio overlay missing"
 	if command -v docker >/dev/null 2>&1; then
 		printf 'container runtime: docker\n'
 	elif command -v podman >/dev/null 2>&1; then
@@ -308,7 +309,7 @@ if grep -q '^CONFIG_LOCALVERSION_AUTO=' "$KERNEL_OUT/.config"; then
 build_dtb() {
 	need dtc; need fdtoverlay; need fdtget
 	mkdirs
-	log "Building Type-C, touchscreen, Bluetooth, and fingerprint device trees"
+	log "Building Type-C, audio, touchscreen, Bluetooth, and fingerprint device trees"
 	local raw_base_dtb="$DTB_OUT/surface-laptop-13-typec-base.dtb"
 	# Prefer the measured Type-C baseline DTB when one is supplied. The public
 	# repository intentionally does not track that binary, so a clean checkout
@@ -324,11 +325,15 @@ build_dtb() {
 	local touchscreen_overlay="$DTB_OUT/touchscreen.dtbo"
 	local bluetooth_overlay="$DTB_OUT/bluetooth.dtbo"
 	local fingerprint_overlay="$DTB_OUT/fingerprint-usb.dtbo"
+	local audio_overlay="$DTB_OUT/surface-laptop-13-audio.dtbo"
 	dtc -@ -I dts -O dtb -o "$el2_overlay" "$EL2_DTS" >"$DTB_OUT/el2-dtc.log" 2>&1
 	dtc -@ -I dts -O dtb -o "$touchscreen_overlay" "$PUBLIC_DIR/device-tree/overlays/touchscreen.dtso" >"$DTB_OUT/touchscreen-dtc.log" 2>&1
 	dtc -@ -I dts -O dtb -o "$bluetooth_overlay" "$PUBLIC_DIR/device-tree/overlays/bluetooth.dtso" >"$DTB_OUT/bluetooth-dtc.log" 2>&1
 	dtc -@ -I dts -O dtb -o "$fingerprint_overlay" "$PUBLIC_DIR/device-tree/overlays/fingerprint-usb.dtso" >"$DTB_OUT/fingerprint-dtc.log" 2>&1
-	fdtoverlay -i "$raw_base_dtb" -o "$base_dtb" "$touchscreen_overlay"
+	dtc -@ -I dts -O dtb -o "$audio_overlay" "$PUBLIC_DIR/device-tree/overlays/surface-laptop-13-audio.dtso" >"$DTB_OUT/audio-dtc.log" 2>&1
+	fdtoverlay -i "$raw_base_dtb" -o "$base_dtb" "$audio_overlay"
+	fdtoverlay -i "$base_dtb" -o "$base_dtb.touchscreen" "$touchscreen_overlay"
+	mv -f "$base_dtb.touchscreen" "$base_dtb"
 	fdtoverlay -i "$base_dtb" -o "$bluetooth_dtb" "$bluetooth_overlay"
 	fdtoverlay -i "$base_dtb" -o "$fingerprint_dtb" "$fingerprint_overlay"
 	fdtoverlay -i "$bluetooth_dtb" -o "$bluetooth_fingerprint_dtb" "$fingerprint_overlay"
@@ -342,6 +347,10 @@ build_dtb() {
 	bash "$PUBLIC_DIR/tools/build-surface-el2-from-ready.sh" "$bluetooth_fingerprint_dtb" "$DTB_OUT/surface-laptop-13-el2-without-ufs.dtb" --disable-ufs
 	for candidate in "$base_dtb" "$bluetooth_dtb"; do
 		[[ -s "$candidate" ]] || die "empty DTB: $candidate"
+		[[ "$(fdtget "$candidate" /soc@0/codec@6d44000 qcom,dmic-sample-rate)" == 2400000 ]] || die "DMIC sample rate is not 2.4 MHz in $candidate"
+		fdtget "$candidate" /soc@0/codec@6d44000 vdd-micb-supply >/dev/null || die "microphone-bias supply is missing in $candidate"
+		[[ "$(fdtget "$candidate" /soc@0/rsc@17500000/regulators-0/ldo1 regulator-name)" == vreg_l1b_1p8 ]] || die "PM8550-B microphone-bias regulator is missing in $candidate"
+		fdtget "$candidate" /soc@0/codec@6d44000 pinctrl-0 >/dev/null || die "DMIC pinctrl is missing in $candidate"
 		[[ "$(fdtget "$candidate" /soc@0/usb@a600000 dr_mode)" == host ]] || die "USB-C port 0 is not host in $candidate"
 		[[ "$(fdtget "$candidate" /soc@0/usb@a800000 dr_mode)" == host ]] || die "USB-C port 1 is not host in $candidate"
 		[[ "$(fdtget "$candidate" /soc@0/geniqup@ac0000/i2c@a80000 status)" == okay ]] || die "touchscreen I2C controller is disabled in $candidate"

@@ -4,6 +4,7 @@ set -Eeuo pipefail
 real_pacstrap=/usr/lib/surface-laptop-13/pacstrap.real
 surface_firmware_root=/usr/lib/firmware
 surface_audio_ucm=/usr/share/alsa/ucm2/conf.d/x1e80100/MicrosoftCorporation-SurfaceLaptopforBusiness13in1stEdwithSnapdragon-124I00124.conf
+surface_audio_profile=/usr/share/alsa/ucm2/Qualcomm/x1e80100/SurfaceLaptop13-HiFi.conf
 archlinuxarm_build_key=68B3537F39A313B3E574D06777193F152BDBE6A6
 target_root=
 skip_next=
@@ -79,7 +80,7 @@ if (( surface_kernel_requested )); then
     # dependencies through pacstrap first, since pacman -U checks but does not
     # resolve dependencies from the sync databases. systemd-ukify is required
 	# by mkinitcpio to embed the Surface DTB in the installed UKI.
-	pacstrap_args+=(systemd-ukify wireless-regdb alsa-ucm-conf)
+	pacstrap_args+=(systemd-ukify wireless-regdb alsa-utils alsa-ucm-conf)
 fi
 
 dms_greeter_package=
@@ -150,12 +151,18 @@ stage_surface_firmware() {
 stage_surface_audio_ucm() {
     (( surface_kernel_requested )) || return 0
     [[ -n "$target_root" ]] || return 0
-    [[ -f "$surface_audio_ucm" ]] || {
-        printf 'archlinuxarm-pacstrap: live Surface audio UCM profile is missing\n' >&2
-        return 1
-    }
-    install -D -m 0644 "$surface_audio_ucm" \
-        "$target_root$surface_audio_ucm"
+	[[ -f "$surface_audio_ucm" ]] || {
+		printf 'archlinuxarm-pacstrap: live Surface audio UCM profile is missing\n' >&2
+		return 1
+	}
+	[[ -f "$surface_audio_profile" ]] || {
+		printf 'archlinuxarm-pacstrap: live Surface audio UCM implementation is missing\n' >&2
+		return 1
+	}
+	install -D -m 0644 "$surface_audio_ucm" \
+		"$target_root$surface_audio_ucm"
+	install -D -m 0644 "$surface_audio_profile" \
+		"$target_root$surface_audio_profile"
 }
 
 verify_installed_surface_gpu_firmware() {
@@ -189,6 +196,28 @@ install_surface_kernel_package() {
         --config /etc/pacman.conf \
         --noconfirm \
 		-U "$surface_kernel_package"
+}
+
+enable_surface_audio_init() {
+	(( surface_kernel_requested )) || return 0
+	[[ -n "$target_root" ]] || return 0
+	[[ -f "$target_root/etc/systemd/system/surface-audio-init.service" ]] || {
+		printf 'archlinuxarm-pacstrap: installed Surface audio service is missing\n' >&2
+		return 1
+	}
+	install -d "$target_root/etc/systemd/system/multi-user.target.wants"
+	ln -sfn /etc/systemd/system/surface-audio-init.service \
+		"$target_root/etc/systemd/system/multi-user.target.wants/surface-audio-init.service"
+}
+
+mask_surface_tpm_wait() {
+	(( surface_kernel_requested )) || return 0
+	[[ -n "$target_root" ]] || return 0
+	# This model exposes firmware TPM event-log tables but no Linux TPM
+	# character device. systemd's generated tpm2.target otherwise waits for
+	# /dev/tpm0 and /dev/tpmrm0 until the default device timeout (90 seconds).
+	install -d "$target_root/etc/systemd/system"
+	ln -sfn /dev/null "$target_root/etc/systemd/system/tpm2.target"
 }
 
 install_dms_greeter_package() {
@@ -279,6 +308,14 @@ fi
 
 if (( pacstrap_status == 0 )); then
 	install_surface_kernel_package || pacstrap_status=$?
+fi
+
+if (( pacstrap_status == 0 )); then
+	enable_surface_audio_init || pacstrap_status=$?
+fi
+
+if (( pacstrap_status == 0 )); then
+	mask_surface_tpm_wait || pacstrap_status=$?
 fi
 
 if (( pacstrap_status == 0 )); then

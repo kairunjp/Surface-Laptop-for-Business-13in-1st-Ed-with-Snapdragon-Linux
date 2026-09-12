@@ -520,3 +520,8 @@ install -D -m 0755 /usr/local/libexec/archlinuxarm-pacstrap \
 # The patched handler starts NetworkManager and uses nmcli for the selected
 # network, matching the connection method that works on this hardware.
 systemctl enable surface-wifi-reprobe.service
+systemctl enable surface-audio-init.service
+# This laptop exposes TPM firmware tables but no /dev/tpm* device. Mask the
+# generated systemd target so the live environment does not wait 90 seconds
+# for nonexistent TPM device nodes during every boot.
+systemctl mask tpm2.target

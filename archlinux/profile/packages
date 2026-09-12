@@ -1,4 +1,5 @@
 base
+alsa-utils
 alsa-ucm-conf
 archlinuxarm-keyring
 arch-install-scripts
