@@ -278,12 +278,17 @@ download_kernel() {
 
 build_surface_kernel_and_dtb() {
 	local relative source
-	log "Staging firmware for the built-in early Wi-Fi and GPU loaders"
+	log "Staging firmware for the built-in early Wi-Fi, GPU, and DSP loaders"
 	rm -rf -- "$KERNEL_BUILTIN_FIRMWARE_DIR"
 	install -d "$KERNEL_BUILTIN_FIRMWARE_DIR"
 	for relative in "${GPU_FIRMWARE_FILES[@]}"; do
 		source="$FIRMWARE_DIR/$relative"
 		[[ -s "$source" ]] || die "Surface GPU firmware is missing before kernel build: $relative"
+		install -D -m 0644 "$source" "$KERNEL_BUILTIN_FIRMWARE_DIR/$relative"
+	done
+	for relative in "${DSP_FIRMWARE_FILES[@]}"; do
+		source="$FIRMWARE_DIR/$relative"
+		[[ -s "$source" ]] || die "Surface DSP firmware is missing before kernel build: $relative"
 		install -D -m 0644 "$source" "$KERNEL_BUILTIN_FIRMWARE_DIR/$relative"
 	done
 	for relative in \
@@ -306,7 +311,7 @@ build_surface_kernel_and_dtb() {
 		KERNEL_SOURCE="$KERNEL_SOURCE_DIR" \
 		KERNEL_CROSS_COMPILE= \
 		KERNEL_APPLY_PATCHES=1 \
-		KERNEL_EXTRA_FIRMWARE="${GPU_FIRMWARE_FILES[*]} ath12k/WCN7850/hw2.0/amss.bin ath12k/WCN7850/hw2.0/m3.bin ath12k/WCN7850/hw2.0/board.bin ath12k/WCN7850/hw2.0/board-2.bin regulatory.db regulatory.db.p7s" \
+		KERNEL_EXTRA_FIRMWARE="${GPU_FIRMWARE_FILES[*]} ${DSP_FIRMWARE_FILES[*]} ath12k/WCN7850/hw2.0/amss.bin ath12k/WCN7850/hw2.0/m3.bin ath12k/WCN7850/hw2.0/board.bin ath12k/WCN7850/hw2.0/board-2.bin regulatory.db regulatory.db.p7s" \
 		KERNEL_EXTRA_FIRMWARE_DIR="$KERNEL_BUILTIN_FIRMWARE_DIR" \
 		SURFACE_OUTPUT_DIR="$SURFACE_OUTPUT_DIR" \
 		SURFACE_WORK_DIR="$SURFACE_WORK_DIR" \
@@ -689,7 +694,29 @@ build_iso() {
 		-w /workspace/archiso-work \
 		-o /workspace/out \
 		/workspace/profile
+	verify_iso_initramfs
 	cleanup_mounts
+}
+
+verify_iso_initramfs() {
+	local iso initramfs relative
+	iso=$(find "$ARCHISO_OUT_DIR" -maxdepth 1 -type f -name '*.iso' -print -quit)
+	[[ -n "$iso" && -f "$iso" ]] || die "archiso did not produce an ISO"
+	initramfs=/workspace/iso-live-initramfs.img
+	run_chroot rm -f "$initramfs"
+	run_chroot xorriso -osirrox on \
+		-indev "/workspace/out/${iso##*/}" \
+		-extract /arch/boot/aarch64/initramfs-linux.img "$initramfs" >/dev/null 2>&1 ||
+		die "could not extract the ISO live initramfs for verification"
+	run_chroot test -s "$initramfs" ||
+		die "the ISO live initramfs is empty"
+	for relative in "${DSP_FIRMWARE_FILES[@]}"; do
+		if ! run_chroot lsinitcpio --early "$initramfs" | grep -Fqx \
+			"usr/lib/firmware/$relative"; then
+			die "the ISO live initramfs is missing Surface DSP firmware: $relative"
+		fi
+	done
+	run_chroot rm -f "$initramfs"
 }
 
 copy_and_hash_output() {

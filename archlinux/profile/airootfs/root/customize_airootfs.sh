@@ -115,6 +115,20 @@ for firmware in \
     fi
 done
 
+# Verify the DSP files in the early CPIO as well as in the live root. The
+# remoteproc drivers probe during kernel startup, before the live SquashFS is
+# available; a successful rootfs copy alone is not sufficient.
+if [[ -f "$surface_root/dsp-firmware.list" ]]; then
+    while read -r checksum relative; do
+        [[ -n "$checksum" && -n "$relative" ]] || continue
+        if ! lsinitcpio --early /boot/initramfs-linux.img | grep -Fqx \
+            "usr/lib/firmware/$relative"; then
+            printf 'Required DSP firmware is not in the early initramfs: %s\n' "$relative" >&2
+            exit 1
+        fi
+    done < "$surface_root/dsp-firmware.list"
+fi
+
 patch_archinstall_kernel_menu() {
     local package_types
     package_types=$(find /usr/lib -type f \

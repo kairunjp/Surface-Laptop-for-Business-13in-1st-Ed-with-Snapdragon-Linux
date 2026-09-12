@@ -74,8 +74,11 @@ ISO uses the main-branch DSP-enabled DTB by default, so the Qualcomm PMIC GLINK
 battery/charger service is available. The four required DSP files are kept in
 `archlinux/firmware-tree/`, validated against
 `drivers/firmware-manifest.json`, and copied into the live root, installed
-target, and early initramfs. Secure Boot may need to be disabled because the
-development kernel and GRUB payload are unsigned.
+target, and early initramfs. The DSP files are also built into the kernel so
+remoteproc can find them even if the boot medium supplies an incomplete
+initramfs. The CI build verifies the initramfs used by the ISO boot path.
+Secure Boot may need to be disabled because the development kernel and GRUB
+payload are unsigned.
 
 To use a different extracted DSP firmware tree for a local build, override the
 default explicitly:

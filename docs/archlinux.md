@@ -50,9 +50,11 @@ The builder checks every file's size and SHA-256 before staging it.
 
 The workflow also uses the committed Surface ADSP/CDSP firmware tree under
 `archlinux/firmware-tree/`. Its four files are checked against
-`drivers/firmware-manifest.json` and are staged into the live root, target
-root, and early initramfs. CI therefore builds the battery-capable,
-DSP-enabled DTB without an additional URL or manual input.
+`drivers/firmware-manifest.json` and are embedded in the kernel as well as
+staged into the live root, target root, and early initramfs. CI therefore
+builds the battery-capable, DSP-enabled DTB without an additional URL or
+manual input. The build verifies the initramfs that archiso places at
+`arch/boot/aarch64/initramfs-linux.img`, not only the copy in the live root.
 
 The WCN7850 and regulatory blobs are also embedded into the Arch kernel with
 `CONFIG_EXTRA_FIRMWARE`. The device's built-in ath12k/MHI probe can run before
