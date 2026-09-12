@@ -3,6 +3,7 @@ set -Eeuo pipefail
 
 real_pacstrap=/usr/lib/surface-laptop-13/pacstrap.real
 surface_firmware_root=/usr/lib/firmware
+surface_audio_ucm=/usr/share/alsa/ucm2/conf.d/x1e80100/MicrosoftCorporation-SurfaceLaptopforBusiness13in1stEdwithSnapdragon-124I00124.conf
 archlinuxarm_build_key=68B3537F39A313B3E574D06777193F152BDBE6A6
 target_root=
 skip_next=
@@ -78,7 +79,7 @@ if (( surface_kernel_requested )); then
     # dependencies through pacstrap first, since pacman -U checks but does not
     # resolve dependencies from the sync databases. systemd-ukify is required
 	# by mkinitcpio to embed the Surface DTB in the installed UKI.
-	pacstrap_args+=(systemd-ukify wireless-regdb)
+	pacstrap_args+=(systemd-ukify wireless-regdb alsa-ucm-conf)
 fi
 
 dms_greeter_package=
@@ -144,6 +145,17 @@ stage_surface_firmware() {
             install -D -m 0644 "$source" "$destination"
         done < /usr/lib/surface-laptop-13/dsp-firmware.list
     fi
+}
+
+stage_surface_audio_ucm() {
+    (( surface_kernel_requested )) || return 0
+    [[ -n "$target_root" ]] || return 0
+    [[ -f "$surface_audio_ucm" ]] || {
+        printf 'archlinuxarm-pacstrap: live Surface audio UCM profile is missing\n' >&2
+        return 1
+    }
+    install -D -m 0644 "$surface_audio_ucm" \
+        "$target_root$surface_audio_ucm"
 }
 
 verify_installed_surface_gpu_firmware() {
@@ -253,6 +265,12 @@ if (( pacstrap_status == 0 )); then
 	# the device-specific GPU and, when enabled, DSP blobs instead of only
 	# copying them to the rootfs.
 	stage_surface_firmware || pacstrap_status=$?
+fi
+
+if (( pacstrap_status == 0 )); then
+	# WirePlumber needs the machine-specific UCM card mapping in the installed
+	# root as well as in the live ISO; otherwise it exposes only Dummy Output.
+	stage_surface_audio_ucm || pacstrap_status=$?
 fi
 
 if (( pacstrap_status == 0 )); then

@@ -512,7 +512,7 @@ pkgrel=1
 pkgdesc='Surface Laptop 13 custom Linux kernel, modules, DTB, and boot preset'
 arch=('aarch64')
 license=('GPL-2.0-only')
-depends=('mkinitcpio' 'systemd' 'systemd-ukify' 'wireless-regdb')
+depends=('alsa-ucm-conf' 'mkinitcpio' 'systemd' 'systemd-ukify' 'wireless-regdb')
 provides=('linux')
 
 package() {

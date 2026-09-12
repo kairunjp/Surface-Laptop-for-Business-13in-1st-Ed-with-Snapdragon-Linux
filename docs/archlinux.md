@@ -125,6 +125,12 @@ and installed target. Wi-Fi uses the reference set above; Bluetooth uses
 downloaded QCA firmware. The output is an unsigned development image; disable
 Secure Boot before booting it.
 
+The live profile also includes an ALSA UCM2 card-name mapping for this exact
+Surface model. It reuses the matching Surface Pro 12in X1E80100 codec routes,
+which enables WirePlumber to create the physical speaker and microphone nodes;
+the base `alsa-ucm-conf` package and this mapping are copied into the target
+root during archinstall as well.
+
 The ISO is a live environment, not an unattended disk installer. Log in as
 `root` at the console and use the included `archinstall` command. The live
 environment leaves NetworkManager stopped until the Wi-Fi menu needs it. The
