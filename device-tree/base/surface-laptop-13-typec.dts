@@ -8383,7 +8383,7 @@
 	sound {
 		compatible = "qcom,x1e80100-sndcard";
 		model = "X1P42100-Microsoft-Surface-Laptop-13";
-		audio-routing = "SpkrLeft IN", "WSA WSA_SPK1 OUT", "SpkrRight IN", "WSA WSA_SPK2 OUT", "VA DMIC0", "vdd-micb", "VA DMIC1", "vdd-micb";
+		audio-routing = "SpkrLeft IN", "WSA WSA_SPK1 OUT", "SpkrRight IN", "WSA WSA_SPK2 OUT", "VA DMIC0", "vdd-micb", "VA DMIC1", "vdd-micb", "VA DMIC2", "vdd-micb", "VA DMIC3", "vdd-micb";
 
 		va-dai-link {
 			link-name = "VA Capture";

@@ -27,6 +27,7 @@ The experimental fingerprint overlay enables the internal USB2 controller at
 the power-button ELAN `04f3:0c9e` fingerprint reader below it. See
 `docs/fingerprint.md` for evidence, limitations, and test commands.
 
-The experimental 3.5 mm codec work is not part of the default boot artifacts.
-It remains documented as an unvalidated experiment under
-`device-tree/overlays/experimental/`.
+The 3.5 mm codec overlay is currently selected by the default DTB build. It
+adds the WCD9385 codec, both WCD SoundWire children, and WCD playback/capture
+links. It remains under `device-tree/overlays/experimental/` until the
+physical headset and jack-detection paths are tested after reboot.

@@ -392,6 +392,12 @@ build_archlinux_dtbs() {
 			die "Arch DTB does not contain the Surface microphone-bias supply: $current"
 		[[ "$(fdtget "$current" /soc@0/rsc@17500000/regulators-0/ldo1 regulator-name)" == vreg_l1b_1p8 ]] ||
 			die "Arch DTB does not contain PM8550-B microphone-bias LDO1: $current"
+		[[ "$(fdtget "$current" /audio-codec compatible)" == qcom,wcd9385-codec ]] ||
+			die "Arch DTB does not contain the WCD9385 headset codec: $current"
+		[[ "$(fdtget "$current" /soc@0/soundwire@6ad0000 status)" == okay ]] ||
+			die "Arch DTB does not enable the WCD RX SoundWire bus: $current"
+		[[ "$(fdtget "$current" /soc@0/soundwire@6d30000 status)" == okay ]] ||
+			die "Arch DTB does not enable the WCD TX SoundWire bus: $current"
 		fdtget "$current" /soc@0/gpu@3d00000/zap-shader firmware-name >/dev/null ||
 			die "Arch DTB lost the Surface GPU zap-shader firmware node: $current"
 	done
@@ -445,6 +451,12 @@ build_surface_kernel_package() {
 		die "installed target DTB does not contain the Surface microphone-bias supply: $installed_dtb"
 	[[ "$(fdtget "$installed_dtb" /soc@0/rsc@17500000/regulators-0/ldo1 regulator-name)" == vreg_l1b_1p8 ]] ||
 		die "installed target DTB does not contain PM8550-B microphone-bias LDO1: $installed_dtb"
+	[[ "$(fdtget "$installed_dtb" /audio-codec compatible)" == qcom,wcd9385-codec ]] ||
+		die "installed target DTB does not contain the WCD9385 headset codec: $installed_dtb"
+	[[ "$(fdtget "$installed_dtb" /soc@0/soundwire@6ad0000 status)" == okay ]] ||
+		die "installed target DTB does not enable the WCD RX SoundWire bus: $installed_dtb"
+	[[ "$(fdtget "$installed_dtb" /soc@0/soundwire@6d30000 status)" == okay ]] ||
+		die "installed target DTB does not enable the WCD TX SoundWire bus: $installed_dtb"
 	# Keep firmware out of the package itself. linux-firmware may already own
 	# board.bin on newer Arch Linux ARM snapshots, which would make pacman -U
 	# reject this package with a file conflict. The pacstrap wrapper installs
