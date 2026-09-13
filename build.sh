@@ -308,7 +308,7 @@ if grep -q '^CONFIG_LOCALVERSION_AUTO=' "$KERNEL_OUT/.config"; then
 }
 
 build_dtb() {
-	need dtc; need fdtoverlay; need fdtget
+	need dtc; need fdtoverlay; need fdtget; need fdtput
 	mkdirs
 	log "Building Type-C, audio/headset, touchscreen, Bluetooth, and fingerprint device trees"
 	local raw_base_dtb="$DTB_OUT/surface-laptop-13-typec-base.dtb"
@@ -337,6 +337,30 @@ build_dtb() {
 	fdtoverlay -i "$raw_base_dtb" -o "$base_dtb" "$audio_overlay"
 	fdtoverlay -i "$base_dtb" -o "$base_dtb.audio-jack" "$audio_jack_overlay"
 	mv -f "$base_dtb.audio-jack" "$base_dtb"
+	# The measured DTB has no stable symbols for the existing SoundWire and
+	# Q6APM nodes.  Resolve every phandle in the newly-added WCD links from the
+	# resulting tree instead of relying on overlay-local placeholder values.
+	local wcd_codec_phandle swr_rx_phandle swr_tx_phandle rx_macro_phandle
+	local tx_macro_phandle q6apm_phandle q6bedai_phandle
+	wcd_codec_phandle=$(fdtget -t x "$base_dtb" /audio-codec phandle) || die "WCD codec phandle is missing"
+	swr_rx_phandle=$(fdtget -t x "$base_dtb" /soc@0/soundwire@6ad0000 phandle) || die "WCD RX SoundWire phandle is missing"
+	swr_tx_phandle=$(fdtget -t x "$base_dtb" /soc@0/soundwire@6d30000 phandle) || die "WCD TX SoundWire phandle is missing"
+	rx_macro_phandle=$(fdtget -t x "$base_dtb" /soc@0/codec@6ac0000 phandle) || die "LPASS RX macro phandle is missing"
+	tx_macro_phandle=$(fdtget -t x "$base_dtb" /soc@0/codec@6ae0000 phandle) || die "LPASS TX macro phandle is missing"
+	q6apm_phandle=$(fdtget -t x "$base_dtb" /soc@0/remoteproc@6800000/glink-edge/gpr/service@1 phandle) || die "Q6APM phandle is missing"
+	q6bedai_phandle=$(fdtget -t x "$base_dtb" /soc@0/remoteproc@6800000/glink-edge/gpr/service@1/bedais phandle) || die "Q6APM backend DAI phandle is missing"
+	fdtput -t x "$base_dtb" /sound/wcd-playback-dai-link/codec sound-dai \
+		"0x$wcd_codec_phandle" 0 "0x$swr_rx_phandle" 0 "0x$rx_macro_phandle" 0
+	fdtput -t x "$base_dtb" /sound/wcd-capture-dai-link/codec sound-dai \
+		"0x$wcd_codec_phandle" 1 "0x$swr_tx_phandle" 1 "0x$tx_macro_phandle" 0
+	fdtput -t x "$base_dtb" /sound/wcd-playback-dai-link/cpu sound-dai \
+		"0x$q6bedai_phandle" 113
+	fdtput -t x "$base_dtb" /sound/wcd-capture-dai-link/cpu sound-dai \
+		"0x$q6bedai_phandle" 120
+	fdtput -t x "$base_dtb" /sound/wcd-playback-dai-link/platform sound-dai \
+		"0x$q6apm_phandle"
+	fdtput -t x "$base_dtb" /sound/wcd-capture-dai-link/platform sound-dai \
+		"0x$q6apm_phandle"
 	fdtoverlay -i "$base_dtb" -o "$base_dtb.touchscreen" "$touchscreen_overlay"
 	mv -f "$base_dtb.touchscreen" "$base_dtb"
 	fdtoverlay -i "$base_dtb" -o "$bluetooth_dtb" "$bluetooth_overlay"

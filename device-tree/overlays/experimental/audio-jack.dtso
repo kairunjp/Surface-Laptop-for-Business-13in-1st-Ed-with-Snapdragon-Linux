@@ -78,7 +78,7 @@
 			#address-cells = <2>;
 			#size-cells = <0>;
 			status = "okay";
-			/* New phandle for this precompiled DTB's unlabeled SWR bus. */
+			/* Provides a phandle for this precompiled DTB's unlabeled SWR bus. */
 			phandle = <0x300>;
 
 			wcd_rx: codec@0,4 {
@@ -95,7 +95,7 @@
 			#address-cells = <2>;
 			#size-cells = <0>;
 			status = "okay";
-			/* New phandle for this precompiled DTB's unlabeled SWR bus. */
+			/* Provides a phandle for this precompiled DTB's unlabeled SWR bus. */
 			phandle = <0x301>;
 
 			wcd_tx: codec@0,3 {
