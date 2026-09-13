@@ -12,8 +12,10 @@
  * configuration; 4.8 MHz produces a practically silent capture stream on
  * this machine.
  *
- * The numeric phandles are intentional.  This tree is also applied to the
- * measured, decompiled DTB, whose symbols are not guaranteed to be present.
+ * The codec's references to existing DMIC states and the microphone-bias
+ * regulator are filled by build.sh after the overlay is applied.  This keeps
+ * the overlay usable with both the source base DTS and a measured DTB, whose
+ * symbols/phandle numbering may differ.
  */
 
 / {
@@ -31,7 +33,6 @@
 					regulator-min-microvolt = <1856000>;
 					regulator-max-microvolt = <2000000>;
 					regulator-initial-mode = <3>;
-					phandle = <0x190>;
 				};
 			};
 
@@ -39,39 +40,64 @@
 			regulators-0 {
 				compatible = "qcom,pm8550-rpmh-regulators";
 				qcom,pmic-id = "b";
-				vdd-l1-l4-l10-supply = <0x190>;
+				vdd-l1-l4-l10-supply = <&vreg_s4c_1p8>;
 
 				vreg_l1b_1p8: ldo1 {
 					regulator-name = "vreg_l1b_1p8";
 					regulator-min-microvolt = <1800000>;
 					regulator-max-microvolt = <1800000>;
 					regulator-initial-mode = <3>;
-					phandle = <0x191>;
 				};
 			};
 		};
 	};
 
 	fragment@1 {
-		target-path = "/soc@0/pinctrl@6e80000/dmic01-default-state";
+		target-path = "/soc@0/pinctrl@6e80000";
 		__overlay__ {
-			phandle = <0x194>;
+			/* Keep these states private to this overlay so no base-DTB
+			 * phandle or symbol is required. */
+			surface_audio_dmic01_state: surface-audio-dmic01-state {
+				clk-pins {
+					pins = "gpio6";
+					function = "dmic1_clk";
+					drive-strength = <0x08>;
+					output-high;
+				};
+
+				data-pins {
+					pins = "gpio7";
+					function = "dmic1_data";
+					drive-strength = <0x08>;
+					input-enable;
+				};
+			};
+
+			surface_audio_dmic23_state: surface-audio-dmic23-state {
+				clk-pins {
+					pins = "gpio8";
+					function = "dmic2_clk";
+					drive-strength = <0x08>;
+					output-high;
+				};
+
+				data-pins {
+					pins = "gpio9";
+					function = "dmic2_data";
+					drive-strength = <0x08>;
+					input-enable;
+				};
+			};
 		};
 	};
 
 	fragment@2 {
-		target-path = "/soc@0/pinctrl@6e80000/dmic23-default-state";
-		__overlay__ {
-			phandle = <0x195>;
-		};
-	};
-
-	fragment@3 {
 		target-path = "/soc@0/codec@6d44000";
 		__overlay__ {
-			pinctrl-0 = <0x194 0x195>;
+			pinctrl-0 = <&surface_audio_dmic01_state
+					&surface_audio_dmic23_state>;
 			pinctrl-names = "default";
-			vdd-micb-supply = <0x191>;
+			vdd-micb-supply = <&vreg_l1b_1p8>;
 			qcom,dmic-sample-rate = <2400000>;
 		};
 	};

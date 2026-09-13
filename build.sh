@@ -345,12 +345,18 @@ build_dtb() {
 	# Use the same DSP and backlight settings as the validated installed boot.
 	bash "$PUBLIC_DIR/tools/build-surface-el2-from-ready.sh" "$bluetooth_fingerprint_dtb" "$el2_dtb"
 	bash "$PUBLIC_DIR/tools/build-surface-el2-from-ready.sh" "$bluetooth_fingerprint_dtb" "$DTB_OUT/surface-laptop-13-el2-without-ufs.dtb" --disable-ufs
+	local codec_micb codec_pinctrl dmic01_phandle dmic23_phandle micb_phandle
 	for candidate in "$base_dtb" "$bluetooth_dtb"; do
 		[[ -s "$candidate" ]] || die "empty DTB: $candidate"
 		[[ "$(fdtget "$candidate" /soc@0/codec@6d44000 qcom,dmic-sample-rate)" == 2400000 ]] || die "DMIC sample rate is not 2.4 MHz in $candidate"
-		fdtget "$candidate" /soc@0/codec@6d44000 vdd-micb-supply >/dev/null || die "microphone-bias supply is missing in $candidate"
+		codec_micb=$(fdtget -t x "$candidate" /soc@0/codec@6d44000 vdd-micb-supply) || die "microphone-bias supply is missing in $candidate"
 		[[ "$(fdtget "$candidate" /soc@0/rsc@17500000/regulators-0/ldo1 regulator-name)" == vreg_l1b_1p8 ]] || die "PM8550-B microphone-bias regulator is missing in $candidate"
-		fdtget "$candidate" /soc@0/codec@6d44000 pinctrl-0 >/dev/null || die "DMIC pinctrl is missing in $candidate"
+		micb_phandle=$(fdtget -t x "$candidate" /soc@0/rsc@17500000/regulators-0/ldo1 phandle) || die "microphone-bias regulator phandle is missing in $candidate"
+		[[ "$codec_micb" == "$micb_phandle" ]] || die "codec points at the wrong microphone-bias regulator in $candidate"
+		codec_pinctrl=$(fdtget -t x "$candidate" /soc@0/codec@6d44000 pinctrl-0) || die "DMIC pinctrl is missing in $candidate"
+		dmic01_phandle=$(fdtget -t x "$candidate" /soc@0/pinctrl@6e80000/surface-audio-dmic01-state phandle) || die "DMIC01 audio state phandle is missing in $candidate"
+		dmic23_phandle=$(fdtget -t x "$candidate" /soc@0/pinctrl@6e80000/surface-audio-dmic23-state phandle) || die "DMIC23 audio state phandle is missing in $candidate"
+		[[ "$codec_pinctrl" == "$dmic01_phandle $dmic23_phandle" ]] || die "codec points at the wrong DMIC pinctrl states in $candidate"
 		[[ "$(fdtget "$candidate" /soc@0/usb@a600000 dr_mode)" == host ]] || die "USB-C port 0 is not host in $candidate"
 		[[ "$(fdtget "$candidate" /soc@0/usb@a800000 dr_mode)" == host ]] || die "USB-C port 1 is not host in $candidate"
 		[[ "$(fdtget "$candidate" /soc@0/geniqup@ac0000/i2c@a80000 status)" == okay ]] || die "touchscreen I2C controller is disabled in $candidate"

@@ -528,7 +528,7 @@ EOF
 	cat >"$SURFACE_PACKAGE_DIR/PKGBUILD" <<EOF
 pkgname=$SURFACE_PACKAGE_NAME
 pkgver=$package_version
-pkgrel=1
+pkgrel=2
 pkgdesc='Surface Laptop 13 custom Linux kernel, modules, DTB, and boot preset'
 arch=('aarch64')
 license=('GPL-2.0-only')
