@@ -8,9 +8,9 @@
  * speakers, but omits the PM8550-B microphone-bias regulator and the LPASS
  * DMIC pinctrl states.  The VA macro consequently falls back to a dummy
  * vdd-micb regulator and the DMIC pins remain in their boot configuration.
- * The 2.4 MHz clock is also required by the known-good X1-family DMIC
- * configuration; 4.8 MHz produces a practically silent capture stream on
- * this machine.
+ * Retain the 2.4 MHz PDM clock baseline (9.6 MHz MCLK / 4). Neither
+ * microphone wiring nor the required PDM frequency is verified on this
+ * board; this property is not the 48 kHz PCM sample rate.
  *
  * The codec's references to existing DMIC states and the microphone-bias
  * regulator are filled by build.sh after the overlay is applied.  This keeps

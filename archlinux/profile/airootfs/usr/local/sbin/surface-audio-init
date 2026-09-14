@@ -66,15 +66,15 @@ done
 
 failures=0
 
-# Enable both channels. A one-value UCM cset only enables the left channel
-# for these Qualcomm mixer controls, which is why use `sset on,on` here.
-set_simple 'WSA_CODEC_DMA_RX_0 Audio Mixer MultiMedia1' on,on
-set_simple 'MultiMedia2 Mixer VA_CODEC_DMA_TX_0' on,on
+# These topology routing switches are mono graph switches, not per-channel
+# DMA enables. Channel count is negotiated by PCM hw_params.
+set_simple 'WSA_CODEC_DMA_RX_0 Audio Mixer MultiMedia1' on
+set_simple 'MultiMedia2 Mixer VA_CODEC_DMA_TX_0' on
 
-# The known-good 823c04a system used the full AudioReach stream range.  The
-# control is exposed as a normal ALSA mixer element, so use sset rather than
-# cset-by-name (the latter is rejected by this kernel's control parser).
-set_simple 'stream0.vol_ctrl0 MultiMedia1 Playback Volu' 65535
+# AudioReach PARAM_ID_VOL_CTRL_MASTER_GAIN is unsigned Q13: 8192 = 0 dB.
+# 65535 adds 18.06 dB and can clip before the WSA amplifier. The pinned
+# kernel applies this cached value on the next DAPM power-up.
+set_simple 'stream0.vol_ctrl0 MultiMedia1 Playback Volu' 8192
 
 set_simple 'WSA WSA RX0 MUX' AIF1_PB
 set_simple 'WSA WSA RX1 MUX' AIF1_PB
@@ -96,8 +96,8 @@ for side in SpkrLeft SpkrRight; do
 	set_simple "$side PA" 6
 done
 
-# The laptop's two internal microphones are connected to the DMIC0/DMIC1
-# pair, as in the known-good 823c04a profile.
+# Retain the 823c04a DMIC0/1 baseline for comparison only. Board wiring and
+# capture remain UNVERIFIED; selecting DMIC2 twice does not establish stereo.
 set_simple 'VA DEC0 MUX' VA_DMIC
 set_simple 'VA DMIC MUX0' DMIC0
 set_simple 'VA_AIF1_CAP Mixer DEC0' on
@@ -111,7 +111,8 @@ set_simple 'WSA WSA_COMP1' off
 set_simple 'WSA WSA_COMP2' off
 
 if (( failures > 0 )); then
-	log "audio initialization completed with $failures optional control failures"
+	log "audio initialization failed with $failures control errors"
+	exit 1
 else
 	log "audio controls initialized on card $card_index"
 fi

@@ -20,4 +20,6 @@ alsatplg -c build/surface.conf \
   -o build/X1P42100-Microsoft-Surface-Laptop-13-tplg.bin
 ```
 
-The resulting size and SHA-256 are recorded in `drivers/firmware-manifest.json`.
+`drivers/firmware-manifest.json` records the production binary, not the experimental
+output. CI rejects a replacement unless the production baseline is deliberately
+reviewed. See [the offline audio audit](../../docs/audio-audit.md).

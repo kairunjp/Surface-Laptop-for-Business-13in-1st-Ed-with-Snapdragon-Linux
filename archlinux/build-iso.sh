@@ -702,6 +702,41 @@ stage_profile() {
 		"$PROFILE_DIR/grub/surface-laptop-13-archlinux-bluetooth.dtb"
 }
 
+verify_audio_build() {
+	local audit="$OUTPUT_DIR/audio-validation" relative package
+	install -d "$audit" "$ROOTFS_DIR/usr/share/alsa/ucm2"
+	# Use the distribution codec includes installed in this build's rootfs.
+	cp -a "$PROFILE_DIR/airootfs/usr/share/alsa/ucm2/." "$ROOTFS_DIR/usr/share/alsa/ucm2/"
+	for relative in etc/systemd/system/surface-audio-init.service usr/local/sbin/surface-audio-init; do
+		install -D "$PROFILE_DIR/airootfs/$relative" "$ROOTFS_DIR/$relative"
+	done
+	systemd-analyze --root="$ROOTFS_DIR" verify /etc/systemd/system/surface-audio-init.service \
+		2>&1 | tee "$audit/service-validation.txt"
+	python3 "$ROOT_DIR/archlinux/verify-audio.py" \
+		--output "$audit" \
+		--firmware "$FIRMWARE_DIR/qcom/x1e80100/X1P42100-Microsoft-Surface-Laptop-13-tplg.bin" \
+		--ucm-root "$ROOTFS_DIR/usr/share/alsa/ucm2" \
+		--dtb "$PROFILE_DIR/grub/surface-laptop-13-archlinux-bluetooth.dtb" \
+		--dtb "$SURFACE_PACKAGE_DIR/root/boot/surface-laptop-13.dtb" \
+		--vmlinux "$SURFACE_WORK_DIR/kernel/vmlinux" \
+		--image "$SURFACE_WORK_DIR/kernel/Image" | tee "$audit/validation.txt"
+	package=$(find "$SURFACE_PACKAGE_DIR" -maxdepth 1 -name '*.pkg.tar.*' -print -quit)
+	bsdtar -xOf "$package" boot/vmlinuz-linux-surface-laptop-13 | cmp - "$SURFACE_WORK_DIR/kernel/Image"
+	bsdtar -xOf "$package" boot/surface-laptop-13.dtb | cmp - "$PROFILE_DIR/grub/surface-laptop-13-archlinux-bluetooth.dtb"
+	bsdtar -xOf "$package" usr/local/sbin/surface-audio-init | cmp - "$PROFILE_DIR/airootfs/usr/local/sbin/surface-audio-init"
+	printf '%s\n' 'package Image/DTB/service payloads match validated inputs' >> "$audit/validation.txt"
+	cp "$SURFACE_WORK_DIR/kernel/.config" "$audit/kernel.config"
+	cp "$SURFACE_WORK_DIR/kernel/Image" "$audit/Image"
+	cp "$PROFILE_DIR/grub/surface-laptop-13-archlinux-bluetooth.dtb" "$audit/"
+	cp "$FIRMWARE_DIR/qcom/x1e80100/X1P42100-Microsoft-Surface-Laptop-13-tplg.bin" "$audit/"
+	cp "$SURFACE_PACKAGE_DIR"/*.pkg.tar.* "$audit/"
+	cp -a "$PROFILE_DIR/airootfs/usr/share/alsa/ucm2" "$audit/ucm2"
+	cp "$PROFILE_DIR/airootfs/usr/local/sbin/surface-audio-init" "$audit/"
+	cp "$PROFILE_DIR/airootfs/etc/systemd/system/surface-audio-init.service" "$audit/"
+	cp "$ROOT_DIR/kernel/source.lock" "$audit/"
+	(cd "$audit" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
+}
+
 trim_build_inputs() {
 	log "Removing intermediate kernel and firmware inputs"
 	# stage_profile has copied everything mkarchiso needs into PROFILE_DIR. Keep
@@ -823,6 +858,7 @@ main() {
 	build_surface_kernel_package
 	build_dms_greeter_package
 	stage_profile
+	verify_audio_build
 	trim_build_inputs
 	build_iso
 	copy_and_hash_output

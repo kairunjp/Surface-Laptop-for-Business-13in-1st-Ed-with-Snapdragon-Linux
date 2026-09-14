@@ -50,6 +50,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
+            alsa-utils libasound2t64 python3-pyelftools systemd \
             bc bison build-essential ca-certificates cpio curl \
             device-tree-compiler file flex gcc git kmod libarchive-tools \
             libelf-dev libssl-dev openssl patch python3 ripgrep xorriso xz-utils
@@ -88,6 +89,11 @@ jobs:
           dtb="$RUNNER_TEMP/surface-laptop-13-archlinux-bluetooth.dtb"
           xorriso -osirrox on -indev "$iso" \
             -extract /boot/grub/surface-laptop-13-archlinux-bluetooth.dtb "$dtb"
+          cmp "$dtb" build/archlinux/audio-validation/surface-laptop-13-archlinux-bluetooth.dtb
+          xorriso -osirrox on -indev "$iso" \
+            -extract /arch/boot/aarch64/vmlinuz-linux "$RUNNER_TEMP/audio-iso-Image"
+          cmp "$RUNNER_TEMP/audio-iso-Image" build/archlinux/audio-validation/Image
+          (cd build/archlinux/audio-validation && sha256sum -c SHA256SUMS)
           expected=okay
           for node in /soc@0/remoteproc@6800000 /soc@0/remoteproc@32300000; do
             test "$(fdtget "$dtb" "$node" status)" = "$expected"
@@ -106,3 +112,11 @@ jobs:
           path: |
             build/archlinux/*.iso
             build/archlinux/SHA256SUMS
+
+      - name: Upload audio validation and kernel package
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: surface-laptop-13-audio-validation
+          if-no-files-found: error
+          path: build/archlinux/audio-validation/
