@@ -106,12 +106,15 @@ with explicit prefixed names and the same baseline values as the service. CI
 checks both the DT prefix and those boot control names. Hardware boot-sequence
 execution itself is still untested.
 
-The initialization helper now returns failure when mixer operations fail rather
-than reporting success with "optional" errors. It keeps the existing card wait,
-SoundWire wait and simple mixer interface. UCM remains responsible for normal
-session activation. Static validation cannot confirm control existence or execution
-order against hardware. The kernel package contains the service; the existing
-pacstrap wrapper installs the model-specific UCM files from the live image.
+The initialization helper now uses the full ALSA simple-control names (`... Switch`,
+`... Volume`) and returns failure when mixer operations fail rather than reporting
+success with "optional" errors. `amixer` resolves simple elements by exact name;
+the former shortened names could not address the kernel controls. It keeps the
+existing card wait, SoundWire wait and simple mixer interface. UCM remains
+responsible for normal session activation. Static validation cannot confirm
+control existence or execution order against hardware. The kernel package contains
+the service; the existing pacstrap wrapper installs the model-specific UCM files
+from the live image.
 
 ## CI evidence and limits
 

@@ -175,7 +175,23 @@ def main():
     ucm(a.ucm_root, a.output)
     script = ROOT / 'archlinux/profile/airootfs/usr/local/sbin/surface-audio-init'
     run('bash', '-n', str(script))
-    require("Playback Volu' 8192" in script.read_text() and '65535\n' not in script.read_text(), 'Unsafe service gain')
+    service_text = script.read_text()
+    require("Playback Volu' 8192" in service_text and '65535\n' not in service_text, 'Unsafe service gain')
+    for control in [
+        'WSA WSA_RX0 Digital Volume', 'WSA WSA_RX1 Digital Volume',
+        'WSA WSA_COMP1 Switch', 'WSA WSA_COMP2 Switch',
+        'VA_DEC0 Volume', 'VA_DEC1 Volume',
+    ]:
+        require(f"'{control}'" in service_text,
+                'Service uses an incomplete ALSA control name: ' + control)
+    for control in ['COMP Switch', 'BOOST Switch', 'DAC Switch', 'PBR Switch',
+                    'VISENSE Switch', 'CPS Switch', 'PA Volume']:
+        require(f'"$side {control}"' in service_text,
+                'Service uses an incomplete speaker control name: ' + control)
+    for abbreviated in ["WSA WSA_RX0 Digital'", "WSA WSA_RX1 Digital'", "VA_DEC0'", "VA_DEC1'"]:
+        require(abbreviated not in service_text, 'Service retained abbreviated ALSA control: ' + abbreviated)
+    require('"$side COMP"' not in service_text and '"$side PA"' not in service_text,
+            'Service retained abbreviated speaker controls')
     print('service helper: bash syntax OK')
     for path in a.dtb:
         dtb(path)
