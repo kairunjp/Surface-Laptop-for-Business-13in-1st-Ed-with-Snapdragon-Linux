@@ -50,7 +50,11 @@ dB TLV is not an accurate Q13 gain conversion; use raw values for this control.
 
 Both service and UCM now request 8192. WSA digital volume 81 is -3 dB by the
 kernel's -84 dB + 1 dB/step TLV; PA 6 is 0 dB by the WSA884x -9 dB + 1.5 dB/step
-TLV. These baseline values are retained. Raising DSP gain cannot establish correct
+TLV. These baseline values are retained. UCM includes append sequences by default,
+so the generic SpeakerSeq PA=12 (+9 dB by that TLV) could overwrite the local PA=6
+setting despite appearing earlier in the file. An explicit Before.EnableSequence
+now makes the local PA=6 baseline take effect after the generic sequence, matching
+the service. This removes inconsistent settings; it is not a loudness improvement. Raising DSP gain cannot establish correct
 amplifier calibration, boost operation or speaker efficiency. Actual low acoustic
 volume cannot be uniquely diagnosed from the repository. No speculative amplifier,
 voltage or kernel driver changes are made.
@@ -102,7 +106,9 @@ pacstrap wrapper installs the model-specific UCM files from the live image.
 
 `archlinux/verify-audio.py` runs before build intermediates are deleted. It checks
 approved topology size/hash and decoded paths, parses UCM and its includes using
-libasound without opening a card, checks helper shell syntax, validates compiled
+libasound without opening a card, then imports the actual HiFi sequences/includes
+under a strict virtual master (only CardId metadata is substituted, no boot or mixer
+sequence is executed). It checks helper shell syntax, validates compiled
 DTB pinctrl/micb/DAPM/DMA properties and rejects headset nodes/links. The builder
 also runs systemd-analyze verify against the build rootfs.
 

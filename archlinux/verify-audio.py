@@ -4,9 +4,11 @@ import argparse
 import ctypes
 import hashlib
 import json
+import os
 import re
 import struct
 import subprocess
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -71,7 +73,7 @@ def dtb(path):
     print(f'DTB {path.name}: PDM=2400000 GPIO6–9 pinctrl/micb/DAPM/DMA checked; WSA/VA only')
 
 
-def ucm(root):
+def ucm(root, out):
     # Parse with libasound itself; follow static UCM includes without touching hardware.
     lib = ctypes.CDLL('libasound.so.2')
     ptr = ctypes.c_void_p
@@ -104,6 +106,22 @@ def ucm(root):
     require('65535' not in text and "Playback Volu' 8192" in text, 'Unsafe UCM gain')
     require('hw:${CardId},0' in text and 'hw:${CardId},1' in text, 'Wrong UCM PCM mapping')
     print(f'UCM: libasound parsed {len(seen)} files including codec sequences (hardware controls not exercised)')
+    require('Before.EnableSequence "0"' in text, 'Generic PA sequence must precede local baseline')
+    # A virtual master has no BootSequence and strict: skips card discovery.
+    # Replace only CardId metadata; retain every actual HiFi sequence/include.
+    with tempfile.TemporaryDirectory(prefix='surface-ucm-') as temp:
+        virtual = Path(temp)
+        (virtual / 'codecs').symlink_to((root / 'codecs').resolve(), target_is_directory=True)
+        (virtual / 'ucm.conf').write_text('Syntax 4\nUseCasePath.offline { Directory "." File "Offline.conf" }\n')
+        (virtual / 'Offline.conf').write_text('Syntax 4\nSectionUseCase.HiFi { File "/HiFi.conf" Comment "Offline parse only" }\n')
+        (virtual / 'HiFi.conf').write_text(text.replace('${CardId}', 'Offline'))
+        result = subprocess.run(['alsaucm', '-c', 'strict:Offline', 'dump', 'text'],
+                                env={**os.environ, 'ALSA_CONFIG_UCM2': temp},
+                                text=True, capture_output=True, check=True)
+        require('PlaybackPCM hw:Offline,0' in result.stdout and 'CapturePCM hw:Offline,1' in result.stdout,
+                'Expanded UCM has incorrect PCM mapping')
+        (out / 'ucm-expanded.txt').write_text(result.stdout)
+    print('UCM: virtual HiFi import/Include expansion passed; no sequences executed')
 
 
 def embedded(vmlinux, image, data, out):
@@ -146,7 +164,7 @@ def main():
     a = p.parse_args()
     a.output.mkdir(parents=True, exist_ok=True)
     data = topology(a.firmware, a.output)
-    ucm(a.ucm_root)
+    ucm(a.ucm_root, a.output)
     script = ROOT / 'archlinux/profile/airootfs/usr/local/sbin/surface-audio-init'
     run('bash', '-n', str(script))
     require("Playback Volu' 8192" in script.read_text() and '65535\n' not in script.read_text(), 'Unsafe service gain')
