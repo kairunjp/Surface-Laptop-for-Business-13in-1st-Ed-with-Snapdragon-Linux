@@ -130,7 +130,6 @@ check_inputs() {
 	[[ -f "$PUBLIC_DIR/device-tree/overlays/bluetooth.dtso" ]] || die "public Bluetooth overlay missing"
 	[[ -f "$PUBLIC_DIR/device-tree/overlays/fingerprint-usb.dtso" ]] || die "public fingerprint USB overlay missing"
 	[[ -f "$PUBLIC_DIR/device-tree/overlays/surface-laptop-13-audio.dtso" ]] || die "public Surface audio overlay missing"
-	[[ -f "$PUBLIC_DIR/device-tree/overlays/experimental/audio-jack.dtso" ]] || die "Surface audio-jack overlay missing"
 	if command -v docker >/dev/null 2>&1; then
 		printf 'container runtime: docker\n'
 	elif command -v podman >/dev/null 2>&1; then
@@ -308,9 +307,9 @@ if grep -q '^CONFIG_LOCALVERSION_AUTO=' "$KERNEL_OUT/.config"; then
 }
 
 build_dtb() {
-	need dtc; need fdtoverlay; need fdtget; need fdtput
+	need dtc; need fdtoverlay; need fdtget
 	mkdirs
-	log "Building Type-C, audio/headset, touchscreen, Bluetooth, and fingerprint device trees"
+	log "Building Type-C, audio, touchscreen, Bluetooth, and fingerprint device trees"
 	local raw_base_dtb="$DTB_OUT/surface-laptop-13-typec-base.dtb"
 	# Prefer the measured Type-C baseline DTB when one is supplied. The public
 	# repository intentionally does not track that binary, so a clean checkout
@@ -327,40 +326,12 @@ build_dtb() {
 	local bluetooth_overlay="$DTB_OUT/bluetooth.dtbo"
 	local fingerprint_overlay="$DTB_OUT/fingerprint-usb.dtbo"
 	local audio_overlay="$DTB_OUT/surface-laptop-13-audio.dtbo"
-	local audio_jack_overlay="$DTB_OUT/surface-laptop-13-audio-jack.dtbo"
 	dtc -@ -I dts -O dtb -o "$el2_overlay" "$EL2_DTS" >"$DTB_OUT/el2-dtc.log" 2>&1
 	dtc -@ -I dts -O dtb -o "$touchscreen_overlay" "$PUBLIC_DIR/device-tree/overlays/touchscreen.dtso" >"$DTB_OUT/touchscreen-dtc.log" 2>&1
 	dtc -@ -I dts -O dtb -o "$bluetooth_overlay" "$PUBLIC_DIR/device-tree/overlays/bluetooth.dtso" >"$DTB_OUT/bluetooth-dtc.log" 2>&1
 	dtc -@ -I dts -O dtb -o "$fingerprint_overlay" "$PUBLIC_DIR/device-tree/overlays/fingerprint-usb.dtso" >"$DTB_OUT/fingerprint-dtc.log" 2>&1
 	dtc -@ -I dts -O dtb -o "$audio_overlay" "$PUBLIC_DIR/device-tree/overlays/surface-laptop-13-audio.dtso" >"$DTB_OUT/audio-dtc.log" 2>&1
-	dtc -@ -I dts -O dtb -o "$audio_jack_overlay" "$PUBLIC_DIR/device-tree/overlays/experimental/audio-jack.dtso" >"$DTB_OUT/audio-jack-dtc.log" 2>&1
 	fdtoverlay -i "$raw_base_dtb" -o "$base_dtb" "$audio_overlay"
-	fdtoverlay -i "$base_dtb" -o "$base_dtb.audio-jack" "$audio_jack_overlay"
-	mv -f "$base_dtb.audio-jack" "$base_dtb"
-	# The measured DTB has no stable symbols for the existing SoundWire and
-	# Q6APM nodes.  Resolve every phandle in the newly-added WCD links from the
-	# resulting tree instead of relying on overlay-local placeholder values.
-	local wcd_codec_phandle swr_rx_phandle swr_tx_phandle rx_macro_phandle
-	local tx_macro_phandle q6apm_phandle q6bedai_phandle
-	wcd_codec_phandle=$(fdtget -t x "$base_dtb" /audio-codec phandle) || die "WCD codec phandle is missing"
-	swr_rx_phandle=$(fdtget -t x "$base_dtb" /soc@0/soundwire@6ad0000 phandle) || die "WCD RX SoundWire phandle is missing"
-	swr_tx_phandle=$(fdtget -t x "$base_dtb" /soc@0/soundwire@6d30000 phandle) || die "WCD TX SoundWire phandle is missing"
-	rx_macro_phandle=$(fdtget -t x "$base_dtb" /soc@0/codec@6ac0000 phandle) || die "LPASS RX macro phandle is missing"
-	tx_macro_phandle=$(fdtget -t x "$base_dtb" /soc@0/codec@6ae0000 phandle) || die "LPASS TX macro phandle is missing"
-	q6apm_phandle=$(fdtget -t x "$base_dtb" /soc@0/remoteproc@6800000/glink-edge/gpr/service@1 phandle) || die "Q6APM phandle is missing"
-	q6bedai_phandle=$(fdtget -t x "$base_dtb" /soc@0/remoteproc@6800000/glink-edge/gpr/service@1/bedais phandle) || die "Q6APM backend DAI phandle is missing"
-	fdtput -t x "$base_dtb" /sound/wcd-playback-dai-link/codec sound-dai \
-		"0x$wcd_codec_phandle" 0 "0x$swr_rx_phandle" 0 "0x$rx_macro_phandle" 0
-	fdtput -t x "$base_dtb" /sound/wcd-capture-dai-link/codec sound-dai \
-		"0x$wcd_codec_phandle" 1 "0x$swr_tx_phandle" 1 "0x$tx_macro_phandle" 0
-	fdtput -t x "$base_dtb" /sound/wcd-playback-dai-link/cpu sound-dai \
-		"0x$q6bedai_phandle" 113
-	fdtput -t x "$base_dtb" /sound/wcd-capture-dai-link/cpu sound-dai \
-		"0x$q6bedai_phandle" 120
-	fdtput -t x "$base_dtb" /sound/wcd-playback-dai-link/platform sound-dai \
-		"0x$q6apm_phandle"
-	fdtput -t x "$base_dtb" /sound/wcd-capture-dai-link/platform sound-dai \
-		"0x$q6apm_phandle"
 	fdtoverlay -i "$base_dtb" -o "$base_dtb.touchscreen" "$touchscreen_overlay"
 	mv -f "$base_dtb.touchscreen" "$base_dtb"
 	fdtoverlay -i "$base_dtb" -o "$bluetooth_dtb" "$bluetooth_overlay"
@@ -386,11 +357,9 @@ build_dtb() {
 		dmic01_phandle=$(fdtget -t x "$candidate" /soc@0/pinctrl@6e80000/surface-audio-dmic01-state phandle) || die "DMIC01 audio state phandle is missing in $candidate"
 		dmic23_phandle=$(fdtget -t x "$candidate" /soc@0/pinctrl@6e80000/surface-audio-dmic23-state phandle) || die "DMIC23 audio state phandle is missing in $candidate"
 		[[ "$codec_pinctrl" == "$dmic01_phandle $dmic23_phandle" ]] || die "codec points at the wrong DMIC pinctrl states in $candidate"
-		[[ "$(fdtget "$candidate" /audio-codec compatible)" == qcom,wcd9385-codec ]] || die "WCD9385 codec is missing in $candidate"
-		[[ "$(fdtget "$candidate" /soc@0/soundwire@6ad0000 status)" == okay ]] || die "WCD RX SoundWire bus is disabled in $candidate"
-		[[ "$(fdtget "$candidate" /soc@0/soundwire@6d30000 status)" == okay ]] || die "WCD TX SoundWire bus is disabled in $candidate"
-		[[ "$(fdtget "$candidate" /sound/wcd-playback-dai-link link-name)" == "WCD Playback" ]] || die "WCD playback link is missing in $candidate"
-		[[ "$(fdtget "$candidate" /sound/wcd-capture-dai-link link-name)" == "WCD Capture" ]] || die "WCD capture link is missing in $candidate"
+		if fdtget "$candidate" /audio-codec compatible >/dev/null 2>&1; then
+			die "experimental WCD9385 headset codec is enabled in $candidate"
+		fi
 		[[ "$(fdtget "$candidate" /soc@0/usb@a600000 dr_mode)" == host ]] || die "USB-C port 0 is not host in $candidate"
 		[[ "$(fdtget "$candidate" /soc@0/usb@a800000 dr_mode)" == host ]] || die "USB-C port 1 is not host in $candidate"
 		[[ "$(fdtget "$candidate" /soc@0/geniqup@ac0000/i2c@a80000 status)" == okay ]] || die "touchscreen I2C controller is disabled in $candidate"

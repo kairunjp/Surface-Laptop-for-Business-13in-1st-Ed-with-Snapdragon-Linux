@@ -5,7 +5,7 @@ The public build has four independent inputs:
 | Input | Source | Result |
 | --- | --- | --- |
 | Kernel | Linux source plus the neutral config | `Image`, modules, release |
-| Device tree | measured Type-C DTB when supplied, otherwise the checked-in DTS, plus audio/headset, touchscreen/Bluetooth/fingerprint overlays | audio/headset-enabled touchscreen, touchscreen+Bluetooth, and fingerprint DTBs |
+| Device tree | measured Type-C DTB when supplied, otherwise the checked-in DTS, plus audio, touchscreen/Bluetooth/fingerprint overlays | audio-enabled touchscreen, touchscreen+Bluetooth, and fingerprint DTBs |
 | Initramfs | OS-provided initramfs plus early Surface hooks | boot initramfs |
 | UKI metadata | neutral `os-release` and caller cmdline | EFI UKI |
 

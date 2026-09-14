@@ -68,15 +68,10 @@ failures=0
 
 # Enable both channels. A one-value UCM cset only enables the left channel
 # for these Qualcomm mixer controls, which is why use `sset on,on` here.
-set_simple 'RX_CODEC_DMA_RX_0 Audio Mixer MultiMedia1' on,on
 set_simple 'WSA_CODEC_DMA_RX_0 Audio Mixer MultiMedia2' on,on
-set_simple 'MultiMedia3 Mixer TX_CODEC_DMA_TX_3' on,on
 set_simple 'MultiMedia4 Mixer VA_CODEC_DMA_TX_0' on,on
 
 # AudioReach uses 8192 (0 dB / unity) as the firmware-default stream gain.
-# The previous maximum-value override could saturate the DSP and sound
-# distorted even when the desktop volume was low.
-set_simple 'stream0.vol_ctrl0 MultiMedia1 Playback Volu' 8192
 set_simple 'stream1.vol_ctrl1 MultiMedia2 Playback Volu' 8192
 
 set_simple 'WSA WSA RX0 MUX' AIF1_PB

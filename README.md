@@ -21,10 +21,9 @@ Tested on the actual machine:
 - Fingerprint reader in the power button (`04f3:0c9e`): enrollment and
   matching work through fprintd with a small libfprint patch
 
-Known limitations: suspend reboots instead of resuming. The current audio
-changes still need a reboot and physical hardware confirmation; the 3.5 mm
-headset path is now included in the generated DTB and AudioReach topology but
-has not yet been plug/unplug-tested on this machine.
+Known limitations: suspend reboots instead of resuming. The 3.5 mm headset
+overlay is retained as an experiment but is not part of generated DTBs: its
+WCD9385 DAI links currently prevent the base ALSA card from registering.
 
 
 ## Building

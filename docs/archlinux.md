@@ -129,8 +129,8 @@ Secure Boot before booting it.
 
 The live profile includes an ALSA UCM2 card-name mapping and a machine-specific
 profile for this exact Surface model. The profile initializes the AudioReach
-playback gains, both WSA884x speaker amplifiers, the WCD9385 headset paths, and
-the VA DMIC2 stereo route; the
+playback gain, both WSA884x speaker amplifiers, and the VA DMIC2 stereo route;
+the
 `surface-audio-init.service` reapplies those controls after the ALSA/SoundWire
 devices appear. The base `alsa-ucm-conf`, `alsa-utils`, mapping, profile, and
 service are copied into the target root during archinstall as well. The new
