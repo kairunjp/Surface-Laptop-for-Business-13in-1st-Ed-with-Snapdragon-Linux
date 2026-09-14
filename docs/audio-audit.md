@@ -82,7 +82,11 @@ The DT's `qcom,dmic-sample-rate=2400000` describes the PDM clock, not PCM sample
 rate. The VA driver uses a 9.6 MHz MCLK / 4; 4.8 MHz is also a supported divisor,
 so source alone cannot prove the board requires 2.4 MHz. The machine driver's
 [x1e80100_be_hw_params_fixup](https://github.com/torvalds/linux/blob/075b74841bd0065a3bda3440873c747938e69b68/sound/soc/qcom/x1e80100.c)
-fixes the PCM backend to 48 kHz, matching topology. The DT connects micb to
+fixes the PCM backend to 48 kHz, matching topology. `q6dma_hw_params` copies
+width/rate/channel count into the AudioReach configuration, and
+`audioreach_codec_dma_set_media_format` uses `(1 << num_channels) - 1` for the
+active DMA mask (0b11 for two channels). This agrees with DEC0/1, but cannot
+establish whether samples arrive at either pin. The DT connects micb to
 PM8550-B LDO1 at 1.8 V and its parent to SMPS4. Existing DAPM supply routes cover
 DMIC0–3. CI checks the actual phandles and properties; it cannot measure rail
 voltage, clock presence, capture samples or DMA activity. No regulator-always-on
@@ -94,6 +98,13 @@ The normal DT has WSA and VA DAI links only. The normal topology has no WCD9385
 RX/TX backend or headset PCM. Consequently 3.5 mm audio is not implemented in
 this baseline. The experimental m4/overlay remains isolated; restoring it could
 again prevent the base ALSA card from probing. No claim of headset repair is made.
+
+The DT sets `sound-name-prefix="WSA"` on the WSA macro. The previously included
+generic wsa-macro/init.conf BootSequence used unprefixed `WSA_RX* Digital Volume`
+and `WSA_COMP* Switch` names, which do not match this DT's controls. It is replaced
+with explicit prefixed names and the same baseline values as the service. CI
+checks both the DT prefix and those boot control names. Hardware boot-sequence
+execution itself is still untested.
 
 The initialization helper now returns failure when mixer operations fail rather
 than reporting success with "optional" errors. It keeps the existing card wait,

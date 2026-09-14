@@ -50,6 +50,7 @@ def dtb(path):
     smps = '/soc@0/rsc@17500000/regulators-1/smps4'
     require(get(va, 'qcom,dmic-sample-rate', 'u') == '2400000', 'PDM clock must be 2.4 MHz baseline')
     require(get(va, 'pinctrl-names') == 'default', 'Missing default pinctrl')
+    require(get('/soc@0/codec@6b00000', 'sound-name-prefix') == 'WSA', 'Wrong WSA control prefix')
     states = [pins + '/surface-audio-dmic01-state', pins + '/surface-audio-dmic23-state']
     require(get(va, 'pinctrl-0', 'x').split() == [get(s, 'phandle', 'x') for s in states], 'Wrong pinctrl phandles')
     for i, state in enumerate(states):
@@ -101,7 +102,14 @@ def ucm(root, out):
             parse(root / name.lstrip('/') if name.startswith('/') else path.parent / name)
     profile = root / 'Qualcomm/x1e80100/SurfaceLaptop13-HiFi.conf'
     parse(profile)
-    parse(root / 'conf.d/x1e80100/MicrosoftCorporation-SurfaceLaptopforBusiness13in1stEdwithSnapdragon-124I00124.conf')
+    master = root / 'conf.d/x1e80100/MicrosoftCorporation-SurfaceLaptopforBusiness13in1stEdwithSnapdragon-124I00124.conf'
+    parse(master)
+    master_text = master.read_text()
+    require('/codecs/qcom-lpass/wsa-macro/init.conf' not in master_text,
+            'Generic boot controls lack the DT WSA prefix')
+    for control in ['WSA WSA_RX0 Digital Volume', 'WSA WSA_RX1 Digital Volume',
+                    'WSA WSA_COMP1 Switch', 'WSA WSA_COMP2 Switch']:
+        require(f"name='{control}'" in master_text, 'Missing prefixed boot control: ' + control)
     text = profile.read_text()
     require('65535' not in text and "Playback Volu' 8192" in text, 'Unsafe UCM gain')
     require('hw:${CardId},0' in text and 'hw:${CardId},1' in text, 'Wrong UCM PCM mapping')

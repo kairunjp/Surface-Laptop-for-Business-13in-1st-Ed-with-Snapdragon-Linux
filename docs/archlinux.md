@@ -127,13 +127,15 @@ Secure Boot before booting it.
 
 The live profile includes an ALSA UCM2 card-name mapping and a machine-specific
 profile for this exact Surface model. The profile initializes the AudioReach
-playback gain, both WSA884x speaker amplifiers, and the VA DMIC2 stereo route;
-the
+playback gain at Q13 unity (8192), both WSA884x speaker amplifiers, and the
+unverified DMIC0/1 comparison baseline. The
 `surface-audio-init.service` reapplies those controls after the ALSA/SoundWire
 devices appear. The base `alsa-ucm-conf`, `alsa-utils`, mapping, profile, and
 service are copied into the target root during archinstall as well. The new
 DMIC regulator, pinctrl, and 2.4 MHz clock settings are validated in every
-DTB variant produced by the builder.
+DTB variant produced by the builder. Quiet speakers, silent internal capture,
+and 3.5 mm support remain unresolved without hardware testing; 0eebace is not
+a verified fix. See [the source audit and CI checks](audio-audit.md).
 
 The ISO is a live environment, not an unattended disk installer. Log in as
 `root` at the console and use the included `archinstall` command. The live
