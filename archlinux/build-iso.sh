@@ -206,6 +206,8 @@ install_archiso_build_dependencies() {
 	run_chroot pacman-key --lsign-key "$ARCHLINUXARM_BUILD_KEY"
 	run_chroot pacman -Syu --noconfirm
 	run_chroot pacman -S --needed --noconfirm \
+		alsa-ucm-conf \
+		alsa-utils \
 		arch-install-scripts \
 		base-devel \
 		cpio \

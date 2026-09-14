@@ -42,7 +42,7 @@ it does not prove that every observed distortion originates there.
 The pinned kernel
 [topology.c](https://github.com/torvalds/linux/blob/075b74841bd0065a3bda3440873c747938e69b68/sound/soc/qcom/qdsp6/topology.c)
 initializes `mod->gain` from VOL_CTRL_DEFAULT_GAIN and its put callback only caches
-the raw value. `audioreach_gain_event` sends it on DAPM POST_PMU;
+the raw value. `audioreach_pga_event` sends it on DAPM POST_PMU;
 [audioreach.c](https://github.com/torvalds/linux/blob/075b74841bd0065a3bda3440873c747938e69b68/sound/soc/qcom/qdsp6/audioreach.c)
 sends it unchanged to master_gain. Changing the mixer during an active graph is
 not evidence that the DSP applied the new gain. The topology's generic linear
