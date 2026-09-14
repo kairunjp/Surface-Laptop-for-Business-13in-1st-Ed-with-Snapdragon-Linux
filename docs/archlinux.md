@@ -53,12 +53,10 @@ firmware tree under `archlinux/firmware-tree/`. Its five files are checked
 against `drivers/firmware-manifest.json` and are embedded in the kernel as
 well as staged into the live root, target root, and early initramfs. The
 AudioReach topology is stored under the exact model-specific filename that
-the X1P42100 sound driver requests. It is a Surface-specific derivative of the
-redistributable Surface Pro 12in topology in linux-firmware and adds WCD9385
-RX/TX paths for the headset codec; the source is recorded in
-`archlinux/firmware-source/`. CI therefore builds the battery-capable,
-audio-enabled DSP DTB without an additional URL or manual input. The build
-verifies the initramfs that archiso places at
+the X1P42100 sound driver requests. Its contents are the redistributable
+Surface Pro 12in topology from linux-firmware. CI therefore builds the
+battery-capable, audio-enabled DSP DTB without an additional URL or manual
+input. The build verifies the initramfs that archiso places at
 `arch/boot/aarch64/initramfs-linux.img`, not only the copy in the live root.
 
 The WCN7850 and regulatory blobs are also embedded into the Arch kernel with

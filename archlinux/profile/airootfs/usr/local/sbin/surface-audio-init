@@ -42,6 +42,14 @@ set_simple() {
 	fi
 }
 
+set_control() {
+	local name=$1 value=$2
+	if ! amixer -q -c "$card_index" cset "name='$name'" "$value" >/dev/null 2>&1; then
+		log "could not set control: $name=$value"
+		failures=$((failures + 1))
+	fi
+}
+
 card_index=
 for ((attempt = 1; attempt <= 60; attempt++)); do
 	if find_card; then
@@ -68,11 +76,11 @@ failures=0
 
 # Enable both channels. A one-value UCM cset only enables the left channel
 # for these Qualcomm mixer controls, which is why use `sset on,on` here.
-set_simple 'WSA_CODEC_DMA_RX_0 Audio Mixer MultiMedia2' on,on
-set_simple 'MultiMedia4 Mixer VA_CODEC_DMA_TX_0' on,on
+set_simple 'WSA_CODEC_DMA_RX_0 Audio Mixer MultiMedia1' on,on
+set_simple 'MultiMedia2 Mixer VA_CODEC_DMA_TX_0' on,on
 
 # AudioReach uses 8192 (0 dB / unity) as the firmware-default stream gain.
-set_simple 'stream1.vol_ctrl1 MultiMedia2 Playback Volu' 8192
+set_control 'stream0.vol_ctrl0 MultiMedia1 Playback Volu' 8192
 
 set_simple 'WSA WSA RX0 MUX' AIF1_PB
 set_simple 'WSA WSA RX1 MUX' AIF1_PB
