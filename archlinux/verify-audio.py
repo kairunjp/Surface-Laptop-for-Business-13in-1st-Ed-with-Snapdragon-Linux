@@ -174,7 +174,11 @@ def embedded(vmlinux, image, data, out):
         rela = elf.get_section_by_name('.rela.dyn')
         if rela is not None:
             dynsym = elf.get_section(rela['sh_link'])
-            require(dynsym is not None, 'vmlinux relocation symbol table is missing')
+            # objcopy may clear the relocation section's sh_link while
+            # retaining the kernel .symtab. ABS64 entries still use that
+            # symbol numbering, so fall back to the normal symbol table.
+            if not hasattr(dynsym, 'get_symbol'):
+                dynsym = sym
             for rel in rela.iter_relocations():
                 kind = rel['r_info_type']
                 if kind == 1027:  # R_AARCH64_RELATIVE
