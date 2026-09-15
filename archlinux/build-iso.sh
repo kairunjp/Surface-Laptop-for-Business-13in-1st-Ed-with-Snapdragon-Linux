@@ -242,8 +242,14 @@ download_dms_greeter() {
 download_archiso() {
 	local mkarchiso
 	log "Fetching archiso ${ARCHISO_REF}"
-	git clone --depth=1 --branch "$ARCHISO_REF" \
-		https://github.com/archlinux/archiso.git "$ARCHISO_SOURCE_DIR"
+	# Git 2.55 can return 1 for an annotated shallow tag even after it has
+	# checked out the tag's commit. Accept that outcome only when the complete
+	# mkarchiso tree is present; a genuinely incomplete clone still aborts.
+	if ! git clone --depth=1 --branch "$ARCHISO_REF" \
+		https://github.com/archlinux/archiso.git "$ARCHISO_SOURCE_DIR"; then
+		[[ -x "$ARCHISO_SOURCE_DIR/archiso/mkarchiso" ]] ||
+			die "archiso clone failed for ${ARCHISO_REF}"
+	fi
 	[[ -x "$ARCHISO_SOURCE_DIR/archiso/mkarchiso" ]] || die "mkarchiso was not found"
 
 	# archiso's generic UEFI module list targets the x86_64 GRUB package.  The
