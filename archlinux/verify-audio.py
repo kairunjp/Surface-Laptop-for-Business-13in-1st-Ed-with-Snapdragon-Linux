@@ -163,12 +163,38 @@ def embedded(vmlinux, image, data, out):
                 for seg in elf.iter_segments() if seg['p_type'] == 'PT_LOAD')
             raise RuntimeError(f'Unmapped firmware address 0x{addr:x} ({size} bytes); PT_LOAD={ranges}')
         sym = elf.get_section_by_name('.symtab')
+        require(sym is not None, 'vmlinux has no symbol table')
+
+        # arm64 relocatable kernels are linked with --no-apply-dynamic-relocs.
+        # The pointer words in .builtin_fw are consequently zero in the file;
+        # R_AARCH64_RELATIVE stores their link-time addresses in .rela.dyn.
+        # Resolve those entries before following the firmware name/data.
+        relocations = {}
+        mask64 = (1 << 64) - 1
+        rela = elf.get_section_by_name('.rela.dyn')
+        if rela is not None:
+            dynsym = elf.get_section(rela['sh_link'])
+            require(dynsym is not None, 'vmlinux relocation symbol table is missing')
+            for rel in rela.iter_relocations():
+                kind = rel['r_info_type']
+                if kind == 1027:  # R_AARCH64_RELATIVE
+                    relocations[rel['r_offset']] = rel['r_addend'] & mask64
+                elif kind == 257:  # R_AARCH64_ABS64
+                    target = dynsym.get_symbol(rel['r_info_sym'])['st_value']
+                    relocations[rel['r_offset']] = (target + rel['r_addend']) & mask64
+
+        def pointer(addr):
+            if addr in relocations:
+                return relocations[addr]
+            return struct.unpack('<Q', read(addr, 8))[0]
+
         start = sym.get_symbol_by_name('__start_builtin_fw')[0]['st_value']
         end = sym.get_symbol_by_name('__end_builtin_fw')[0]['st_value']
         require((end-start) % 24 == 0, 'Unexpected builtin_fw layout')
         matches = []
         for addr in range(start, end, 24):
-            name, payload, size = struct.unpack('<QQQ', read(addr, 24))
+            name, payload, size = (pointer(addr), pointer(addr + 8),
+                                   struct.unpack('<Q', read(addr + 16, 8))[0])
             name = read(name, 256).split(b'\0', 1)[0].decode()
             if name.endswith('-tplg.bin'):
                 matches.append(name)
