@@ -139,11 +139,29 @@ def embedded(vmlinux, image, data, out):
         require(elf.elfclass == 64 and elf.little_endian, 'Expected little-endian arm64 ELF')
         def read(addr, size):
             for seg in elf.iter_segments():
-                start = seg['p_vaddr']
-                if seg['p_type'] == 'PT_LOAD' and start <= addr and addr + size <= start + seg['p_filesz']:
-                    f.seek(seg['p_offset'] + addr - start)
+                if seg['p_type'] != 'PT_LOAD':
+                    continue
+                # vmlinux normally uses p_vaddr, but a few arm64 linkers keep
+                # a LOAD's file address in p_paddr when the VMA/LMA differ.
+                for start in (seg['p_vaddr'], seg['p_paddr']):
+                    if start <= addr and addr + size <= start + seg['p_filesz']:
+                        f.seek(seg['p_offset'] + addr - start)
+                        return f.read(size)
+            # Some arm64 vmlinux link layouts leave the firmware table in an
+            # allocated section whose PT_LOAD boundary is represented only by
+            # its physical address. Resolve that file-backed section directly
+            # before failing, while still rejecting BSS/unmapped pointers.
+            for section in elf.iter_sections():
+                if section['sh_type'] == 'SHT_NOBITS':
+                    continue
+                start = section['sh_addr']
+                if start <= addr and addr + size <= start + section['sh_size']:
+                    f.seek(section['sh_offset'] + addr - start)
                     return f.read(size)
-            raise RuntimeError('Unmapped firmware address')
+            ranges = ', '.join(
+                f"0x{seg['p_vaddr']:x}-0x{seg['p_vaddr'] + seg['p_filesz']:x}"
+                for seg in elf.iter_segments() if seg['p_type'] == 'PT_LOAD')
+            raise RuntimeError(f'Unmapped firmware address 0x{addr:x} ({size} bytes); PT_LOAD={ranges}')
         sym = elf.get_section_by_name('.symtab')
         start = sym.get_symbol_by_name('__start_builtin_fw')[0]['st_value']
         end = sym.get_symbol_by_name('__end_builtin_fw')[0]['st_value']

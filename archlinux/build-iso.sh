@@ -105,7 +105,6 @@ OUTPUT_DIR=$(absolute_path "$OUTPUT_DIR")
 
 cleanup_mounts() {
 	local index
-	set +e
 	for ((index=${#MOUNTS[@]}-1; index>=0; index--)); do
 		umount -R "${MOUNTS[index]}" >/dev/null 2>&1 || true
 	done
