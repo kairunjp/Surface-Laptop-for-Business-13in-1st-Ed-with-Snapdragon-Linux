@@ -321,6 +321,11 @@ build_surface_kernel_and_dtb() {
 		SURFACE_WORK_DIR="$SURFACE_WORK_DIR" \
 		SOURCE_DATE_EPOCH="$SOURCE_DATE_EPOCH" \
 		"$ROOT_DIR/build.sh" kernel
+	# verify-audio.py inspects the unstripped ELF firmware table. Keep this
+	# explicit check next to the kernel build so an output-path regression cannot
+	# turn the required embedded-topology check into a no-op.
+	[[ -s "$SURFACE_WORK_DIR/kernel/vmlinux" ]] ||
+		die "Surface kernel vmlinux is missing after kernel build"
 
 	log "Building Surface device trees"
 	env \
@@ -706,6 +711,10 @@ stage_profile() {
 
 verify_audio_build() {
 	local audit="$OUTPUT_DIR/audio-validation" relative package
+	[[ -s "$SURFACE_WORK_DIR/kernel/vmlinux" ]] ||
+		die "Surface kernel vmlinux is missing before audio validation"
+	[[ -s "$SURFACE_WORK_DIR/kernel/Image" ]] ||
+		die "Surface kernel Image is missing before audio validation"
 	install -d "$audit" "$ROOTFS_DIR/usr/share/alsa/ucm2"
 	# Use the distribution codec includes installed in this build's rootfs.
 	cp -a "$PROFILE_DIR/airootfs/usr/share/alsa/ucm2/." "$ROOTFS_DIR/usr/share/alsa/ucm2/"

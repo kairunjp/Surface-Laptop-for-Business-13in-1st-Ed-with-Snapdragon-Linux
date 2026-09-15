@@ -167,8 +167,11 @@ def main():
     p.add_argument('--firmware', type=Path, default=ROOT / 'archlinux/firmware-tree' / FW)
     p.add_argument('--dtb', type=Path, action='append', default=[])
     p.add_argument('--ucm-root', type=Path, required=True)
-    p.add_argument('--vmlinux', type=Path)
-    p.add_argument('--image', type=Path)
+    # The kernel firmware table is part of the acceptance criteria.  Keep
+    # these arguments mandatory so a CI invocation cannot silently validate
+    # only the topology/DTB/UCM inputs.
+    p.add_argument('--vmlinux', type=Path, required=True)
+    p.add_argument('--image', type=Path, required=True)
     a = p.parse_args()
     a.output.mkdir(parents=True, exist_ok=True)
     data = topology(a.firmware, a.output)
@@ -195,9 +198,9 @@ def main():
     print('service helper: bash syntax OK')
     for path in a.dtb:
         dtb(path)
-    if a.vmlinux:
-        require(a.image is not None, '--image is required with --vmlinux')
-        embedded(a.vmlinux, a.image, data, a.output)
+    require(a.vmlinux.is_file(), f'vmlinux is missing: {a.vmlinux}')
+    require(a.image.is_file(), f'boot Image is missing: {a.image}')
+    embedded(a.vmlinux, a.image, data, a.output)
     print('PASS: static consistency only; acoustic output, physical DMIC wiring and headset remain unverified')
 
 
