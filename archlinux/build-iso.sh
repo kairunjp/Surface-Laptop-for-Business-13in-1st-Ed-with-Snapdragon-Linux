@@ -268,7 +268,9 @@ download_archiso() {
 		-e 's/ fat font / fat font fdt /' \
 		"$mkarchiso"
 	grep -Fq 'font fdt' "$mkarchiso" || die "failed to add the AArch64 GRUB fdt module"
-	grep -Fq 'at_keyboard' "$mkarchiso" && die "AArch64 GRUB module list still contains at_keyboard"
+	if grep -Fq 'at_keyboard' "$mkarchiso"; then
+		die "AArch64 GRUB module list still contains at_keyboard"
+	fi
 }
 
 download_kernel() {
