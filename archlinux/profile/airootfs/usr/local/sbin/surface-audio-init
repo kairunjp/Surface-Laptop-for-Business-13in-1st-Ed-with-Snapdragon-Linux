@@ -36,6 +36,8 @@ soundwire_speakers_ready() {
 
 set_simple() {
 	local name=$1 value=$2
+	# sset takes ALSA simple-element names, not the raw cset control names.
+	# alsa-lib strips Volume/Switch suffixes while constructing these elements.
 	if ! amixer -q -c "$card_index" sset "$name" "$value" >/dev/null 2>&1; then
 		log "could not set simple control: $name=$value"
 		failures=$((failures + 1))
@@ -80,20 +82,20 @@ set_simple 'WSA WSA RX0 MUX' AIF1_PB
 set_simple 'WSA WSA RX1 MUX' AIF1_PB
 set_simple 'WSA WSA_RX0 INP0' RX0
 set_simple 'WSA WSA_RX1 INP0' RX1
-set_simple 'WSA WSA_RX0 Digital Volume' 81
-set_simple 'WSA WSA_RX1 Digital Volume' 81
+set_simple 'WSA WSA_RX0 Digital' 81
+set_simple 'WSA WSA_RX1 Digital' 81
 set_simple 'WSA WSA_RX0 Digital Mute' off
 set_simple 'WSA WSA_RX1 Digital Mute' off
 
 for side in SpkrLeft SpkrRight; do
-	set_simple "$side COMP Switch" on
-	set_simple "$side BOOST Switch" on
-	set_simple "$side DAC Switch" on
-	set_simple "$side PBR Switch" on
-	set_simple "$side VISENSE Switch" off
-	set_simple "$side CPS Switch" off
+	set_simple "$side COMP" on
+	set_simple "$side BOOST" on
+	set_simple "$side DAC" on
+	set_simple "$side PBR" on
+	set_simple "$side VISENSE" off
+	set_simple "$side CPS" off
 	set_simple "$side WSA MODE" Speaker
-	set_simple "$side PA Volume" 6
+	set_simple "$side PA" 6
 done
 
 # Retain the 823c04a DMIC0/1 baseline for comparison only. Board wiring and
@@ -101,14 +103,14 @@ done
 set_simple 'VA DEC0 MUX' VA_DMIC
 set_simple 'VA DMIC MUX0' DMIC0
 set_simple 'VA_AIF1_CAP Mixer DEC0' on
-set_simple 'VA_DEC0 Volume' 84
+set_simple 'VA_DEC0' 84
 set_simple 'VA DEC1 MUX' VA_DMIC
 set_simple 'VA DMIC MUX1' DMIC1
 set_simple 'VA_AIF1_CAP Mixer DEC1' on
-set_simple 'VA_DEC1 Volume' 84
+set_simple 'VA_DEC1' 84
 
-set_simple 'WSA WSA_COMP1 Switch' off
-set_simple 'WSA WSA_COMP2 Switch' off
+set_simple 'WSA WSA_COMP1' off
+set_simple 'WSA WSA_COMP2' off
 
 if (( failures > 0 )); then
 	log "audio initialization failed with $failures control errors"

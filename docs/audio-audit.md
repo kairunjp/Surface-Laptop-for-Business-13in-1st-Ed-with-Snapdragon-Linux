@@ -106,15 +106,38 @@ with explicit prefixed names and the same baseline values as the service. CI
 checks both the DT prefix and those boot control names. Hardware boot-sequence
 execution itself is still untested.
 
-The initialization helper now uses the full ALSA simple-control names (`... Switch`,
-`... Volume`) and returns failure when mixer operations fail rather than reporting
-success with "optional" errors. `amixer` resolves simple elements by exact name;
-the former shortened names could not address the kernel controls. It keeps the
+Correction to the previous audit: raw control names (`... Switch`, `... Volume`)
+are for UCM `cset`, not `amixer sset`. ALSA's
+[simple_none.c](https://github.com/alsa-project/alsa-lib/blob/master/src/mixer/simple_none.c)
+`base_len` strips those suffixes when constructing simple elements. The previous
+change to full names in the helper was a regression affecting speaker controls
+and VA_DEC0/1 capture gain. The helper again uses the simple names and the CI
+check compares them with the raw driver names. UCM retains raw names. The helper
+returns failure when mixer operations fail rather than reporting success with
+"optional" errors. It keeps the
 existing card wait, SoundWire wait and simple mixer interface. UCM remains
 responsible for normal session activation. Static validation cannot confirm
 control existence or execution order against hardware. The kernel package contains
 the service; the existing pacstrap wrapper installs the model-specific UCM files
 from the live image.
+
+## Main comparison and production read-only inspection (2026-09-15)
+
+`main` at 3d52bda contains the kernel/DT support, but no speaker UCM, init helper,
+or explicit AudioReach/WSA gain values to migrate. The reference OS userspace
+settings are needed to identify its working speaker gain; the current 8192/81/6
+values are not claimed to have been copied from main. Main's VA PDM property is
+4.8 MHz, while archlinux's overlay uses 2.4 MHz. Both are supported by the driver;
+that difference alone does not establish the silent microphone's cause.
+
+Read-only SSH inspection of `root@surface-pve` found Debian 13 and kernel
+7.2.0-rc5-surface-laptop-13, no ALSA cards, and both `/sound` and the ADSP
+remoteproc disabled in its live DT. Deferred probes report that VA cannot obtain
+the macro clock; WSA and LPASS pinctrl also wait for suppliers. No active mic
+DMA/DAPM path or speaker mixer values can be read in that boot state. No mixer,
+capture, configuration, module, power, mount, or reboot operations were performed.
+The absent card in this intentionally disabled production boot must not be
+treated as evidence of the silent-capture cause in the archlinux boot.
 
 ## CI evidence and limits
 

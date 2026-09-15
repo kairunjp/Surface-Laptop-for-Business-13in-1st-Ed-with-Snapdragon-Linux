@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import struct
 import subprocess
 import tempfile
@@ -228,21 +229,32 @@ def main():
     run('bash', '-n', str(script))
     service_text = script.read_text()
     require("Playback Volu' 8192" in service_text and '65535\n' not in service_text, 'Unsafe service gain')
-    for control in [
-        'WSA WSA_RX0 Digital Volume', 'WSA WSA_RX1 Digital Volume',
-        'WSA WSA_COMP1 Switch', 'WSA WSA_COMP2 Switch',
-        'VA_DEC0 Volume', 'VA_DEC1 Volume',
-    ]:
-        require(f"'{control}'" in service_text,
-                'Service uses an incomplete ALSA control name: ' + control)
-    for control in ['COMP Switch', 'BOOST Switch', 'DAC Switch', 'PBR Switch',
-                    'VISENSE Switch', 'CPS Switch', 'PA Volume']:
-        require(f'"$side {control}"' in service_text,
-                'Service uses an incomplete speaker control name: ' + control)
-    for abbreviated in ["WSA WSA_RX0 Digital'", "WSA WSA_RX1 Digital'", "VA_DEC0'", "VA_DEC1'"]:
-        require(abbreviated not in service_text, 'Service retained abbreviated ALSA control: ' + abbreviated)
-    require('"$side COMP"' not in service_text and '"$side PA"' not in service_text,
-            'Service retained abbreviated speaker controls')
+    # Kernel/UCM raw controls and amixer sset simple elements use different
+    # namespaces. alsa-lib simple_none.c:base_len strips these suffixes.
+    # Compare the actual helper calls with the raw driver names, rather than
+    # incorrectly requiring raw Volume/Switch names in an sset invocation.
+    calls = {}
+    for line in service_text.splitlines():
+        if line.strip().startswith('set_simple '):
+            _, name, value = shlex.split(line)
+            for side in ('SpkrLeft', 'SpkrRight') if '$side' in name else ('',):
+                calls[name.replace('$side', side)] = value
+    raw = {
+        'WSA WSA_RX0 Digital Volume': '81', 'WSA WSA_RX1 Digital Volume': '81',
+        'WSA WSA_COMP1 Switch': 'off', 'WSA WSA_COMP2 Switch': 'off',
+        'VA_DEC0 Volume': '84', 'VA_DEC1 Volume': '84',
+    }
+    for side in ('SpkrLeft', 'SpkrRight'):
+        for control, value in {'COMP Switch': 'on', 'BOOST Switch': 'on',
+                               'DAC Switch': 'on', 'PBR Switch': 'on',
+                               'VISENSE Switch': 'off', 'CPS Switch': 'off',
+                               'PA Volume': '6'}.items():
+            raw[f'{side} {control}'] = value
+    for name, value in raw.items():
+        simple = re.sub(r' (Volume|Switch)$', '', name)
+        require(calls.get(simple) == value and name not in calls,
+                f'Wrong sset name/value: raw {name!r} must use {simple!r}={value}')
+    print('service: ALSA simple-element gain/switch names checked against raw controls')
     print('service helper: bash syntax OK')
     for path in a.dtb:
         dtb(path)
